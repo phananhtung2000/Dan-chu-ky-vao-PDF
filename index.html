@@ -1,0 +1,3016 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover">
+<title>Chèn chữ ký vào PDF</title>
+<style>
+  /* =========================================================
+     0. TOKENS — bảng màu / kiểu chữ / khoảng cách dùng chung
+     ========================================================= */
+  :root{
+    --bg-app:      #f1f8f4;
+    --bg-shell:    #ffffff;
+    --bg-canvas:   #f6fbf8;
+
+    --border:       #d9ecdf;
+    --border-light: #bfe0cb;
+
+    --text-primary:   #16342a;
+    --text-secondary: #4a7160;
+    --text-muted:     #86a698;
+
+    --accent:        #2f9e64;
+    --accent-strong: #1f7a4d;
+    --accent-soft:   rgba(47,158,100,0.12);
+
+    --danger:      #d64545;
+
+    --radius-sm: 6px;
+    --radius-md: 10px;
+
+    --font-ui: "Segoe UI", "Inter", system-ui, -apple-system, sans-serif;
+  }
+
+  *{ box-sizing: border-box; }
+  html, body{
+    margin: 0;
+    min-height: 100%;
+    background: var(--bg-app);
+    font-family: var(--font-ui);
+    color: var(--text-primary);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* =========================================================
+     1. KHUNG ỨNG DỤNG — một cột dọc duy nhất, mobile-first
+     ========================================================= */
+  .app{
+    width: 100%;
+    max-width: 480px;   /* trên máy tính cũng chỉ hiển thị như 1 khung điện thoại nới rộng */
+    margin: 0 auto;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-app);
+  }
+
+  .app-header{
+    padding: 16px 16px 4px;
+    text-align: center;
+  }
+  .app-header h1{
+    margin: 0;
+    font-size: 18px;
+    font-weight: 800;
+    color: var(--accent-strong);
+  }
+  .app-header p{
+    margin: 4px 0 0;
+    font-size: 12.5px;
+    color: var(--text-secondary);
+  }
+
+  .app-body{
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    padding: 14px 16px 24px;
+    /* Điện thoại có tai thỏ/thanh cử chỉ (safe area): tránh nội dung/nút bấm
+       bị che khuất ở 2 bên hoặc phía dưới khi cầm ngang hoặc có thanh điều
+       hướng cử chỉ. Cộng thêm vào padding gốc, không thay thế. */
+    padding-left: max(16px, env(safe-area-inset-left));
+    padding-right: max(16px, env(safe-area-inset-right));
+    padding-bottom: calc(24px + env(safe-area-inset-bottom));
+  }
+
+  /* =========================================================
+     2. 2 NÚT CHỌN TỆP Ở TRÊN CÙNG
+     ========================================================= */
+  .pick-buttons{
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .pick-btn{
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+    min-height: 56px;
+    padding: 10px 16px;
+    background: var(--bg-shell);
+    border: 1.5px solid var(--border-light);
+    border-radius: var(--radius-md);
+    color: var(--text-primary);
+    font-family: var(--font-ui);
+    font-size: 15px;
+    font-weight: 600;
+    text-align: left;
+    cursor: pointer;
+    transition: border-color .15s ease, background .15s ease, box-shadow .15s ease;
+  }
+  .pick-btn:active{ background: var(--accent-soft); }
+  .pick-btn:hover{ border-color: var(--accent); }
+
+  .pick-btn .pick-icon{
+    flex-shrink: 0;
+    width: 38px;
+    height: 38px;
+    border-radius: 9px;
+    background: var(--accent-soft);
+    color: var(--accent-strong);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .pick-btn .pick-icon svg{ width: 20px; height: 20px; }
+
+  .pick-btn .pick-text{ flex: 1; min-width: 0; }
+  .pick-btn .pick-label{
+    display: block;
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--text-primary);
+  }
+  .pick-btn .pick-filename{
+    display: block;
+    margin-top: 2px;
+    font-size: 12px;
+    font-weight: 400;
+    color: var(--text-secondary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .pick-btn.is-done{ border-color: var(--accent); }
+  .pick-btn.is-done .pick-icon{ background: var(--accent); color: #fff; }
+
+  /* =========================================================
+     2a. NÚT NHỎ "XÓA HẾT, LÀM VĂN BẢN MỚI" — reset nhanh về trạng thái
+     ban đầu (PDF + chữ ký hiện tại) sau khi đã lưu xong 1 văn bản, không
+     đụng tới 3 ô chữ ký đã lưu sẵn (localStorage riêng, không bị xóa).
+     ========================================================= */
+  .reset-all-row{
+    display: flex;
+    justify-content: flex-end;
+    margin: -4px 2px 0;
+  }
+  .reset-all-btn{
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    background: none;
+    border: none;
+    padding: 4px 2px;
+    font-family: var(--font-ui);
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    cursor: pointer;
+  }
+  .reset-all-btn svg{ width: 13px; height: 13px; }
+  .reset-all-btn:hover:not(:disabled){ color: var(--danger); }
+  .reset-all-btn:disabled{
+    color: var(--text-muted);
+    opacity: .55;
+    cursor: not-allowed;
+  }
+
+  /* =========================================================
+     2b. CHỮ KÝ ĐÃ LƯU SẴN — tối đa 3 ô, bấm hình để dùng lại ngay
+     ========================================================= */
+  .sig-slots-title{
+    margin: 0 0 8px 2px;
+    font-size: 12.5px;
+    font-weight: 700;
+    color: var(--text-secondary);
+  }
+  .sig-slots-row{
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  /* Thu nhỏ tiếp lần 2 theo yêu cầu: còn khoảng 40% kích thước lần trước
+     (74px → 30px trên điện thoại, 92px → 37px trên desktop). Nút mini
+     💾/× được giữ ở mức tối thiểu ~14px để vẫn bấm/chạm được, không thu
+     đúng 40% tuyệt đối như ô ảnh (nếu không sẽ nhỏ hơn đầu ngón tay, rất
+     khó thao tác). */
+  .sig-slot{
+    position: relative;
+    flex: 0 0 30px;
+    width: 30px;
+  }
+  .sig-slot-main{
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    padding: 0;
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-family: var(--font-ui);
+  }
+  .sig-slot-thumb{
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    aspect-ratio: 1 / 1;
+    background-color: var(--bg-canvas);
+    background-size: contain;
+    background-position: center;
+    background-repeat: no-repeat;
+    border: 1.5px dashed var(--border-light);
+    border-radius: var(--radius-sm);
+    color: var(--text-muted);
+    font-size: 9px;
+    font-weight: 700;
+  }
+  .sig-slot-thumb.has-image{
+    border-style: solid;
+    border-color: var(--border-light);
+    background-color: #ffffff;
+  }
+  .sig-slot-label{
+    font-size: 7px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-align: center;
+    line-height: 1.2;
+  }
+  .sig-slot-actions{
+    position: absolute;
+    top: -4px;
+    right: -4px;
+    display: flex;
+    gap: 2px;
+  }
+  .sig-slot-mini-btn{
+    width: 14px;
+    height: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1.5px solid #ffffff;
+    border-radius: 50%;
+    box-shadow: 0 1px 4px rgba(20,60,40,0.3);
+    font-size: 8px;
+    line-height: 1;
+    cursor: pointer;
+  }
+  .sig-slot-save{ background: var(--accent); color: #ffffff; }
+  .sig-slot-clear{ background: var(--danger); color: #ffffff; }
+
+  /* Trên desktop, cho phép các ô nhỉnh hơn một chút (vẫn nhỏ gọn) vì có
+     nhiều không gian và dễ bấm hơn bằng chuột. */
+  @media (min-width: 860px){
+    .sig-slot{ flex-basis: 37px; width: 37px; }
+  }
+
+  /* =========================================================
+     3. VÙNG XEM TRƯỚC — tỷ lệ khung hình chuẩn A4 (1 : 1.4142)
+     ========================================================= */
+  .preview-wrap{
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+  .preview-title{
+    font-size: 12.5px;
+    font-weight: 700;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: .3px;
+    margin: 0 0 8px 2px;
+  }
+
+  /* Khung cuộn bọc ngoài preview-frame — chỉ thật sự cuộn được khi đã phóng
+     to (xem is-zoomed bên dưới); ở trạng thái 100% mặc định thì nội dung
+     vừa khít, không có thanh cuộn, y hệt hành vi cũ. */
+  .preview-viewport{
+    width: 100%;
+    overflow: auto;
+    -webkit-overflow-scrolling: touch;
+    border-radius: var(--radius-md);
+  }
+  .preview-viewport.is-zoomed{
+    box-shadow: inset 0 0 0 1.5px var(--accent);
+  }
+
+  .preview-frame{
+    width: 100%;
+    aspect-ratio: 1 / 1.4142;  /* tỷ lệ khổ giấy A4 */
+    background: var(--bg-canvas);
+    border: 1.5px dashed var(--border-light);
+    border-radius: var(--radius-md);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    position: relative;
+    /* width được JS đổi thành 100%–200% khi phóng to để chỉnh tinh (xem mục
+       "PHÓNG TO ĐỂ CHỈNH TINH" trong JS); transition cho việc phóng/thu mượt. */
+    transition: width .15s ease;
+  }
+
+  .preview-placeholder{
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    padding: 20px;
+    text-align: center;
+    color: var(--text-muted);
+  }
+  .preview-placeholder svg{ width: 40px; height: 40px; opacity: .7; }
+  .preview-placeholder span{ font-size: 13px; }
+  .preview-placeholder.is-hidden{ display: none; }
+
+  /* Canvas hiển thị trang PDF — luôn co vừa trong khung preview (không tràn
+     ra ngoài, không làm vỡ bố cục trên điện thoại), giữ nguyên tỷ lệ gốc
+     của trang PDF vì canvas.width/height đã đúng tỷ lệ khi vẽ. */
+  #pdfPreviewCanvas{
+    display: none;
+    max-width: 100%;
+    max-height: 100%;
+    width: auto;
+    height: auto;
+    box-shadow: 0 2px 10px rgba(20,60,40,0.12);
+    background: #ffffff;
+  }
+  #pdfPreviewCanvas.is-visible{ display: block; }
+
+  /* =========================================================
+     3b. LỚP PHỦ ẢNH CHỮ KÝ — kéo thả di chuyển + 4 điểm neo phóng/thu
+     ========================================================= */
+  .sig-overlay{
+    position: absolute;
+    display: none;
+    box-sizing: border-box;
+    border: 1.5px dashed var(--accent);
+    cursor: move;
+    touch-action: none;      /* chặn cuộn trang khi kéo trên cảm ứng */
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  .sig-overlay.is-visible{ display: block; }
+
+  .sig-overlay img{
+    display: block;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;    /* để thao tác kéo luôn nhắm vào khung overlay, không phải <img> */
+    -webkit-user-drag: none;
+    user-select: none;
+    mix-blend-mode: multiply; /* hòa nền trắng/xám của ảnh chữ ký vào nền văn bản khi xem/căn chỉnh */
+  }
+
+  /* =========================================================
+     3a2. LỚP PHỦ CANVAS "CỤC TẨY" (bút tẩy tự do) — phủ kín khung xem
+     trước, trong suốt cho tới khi có nét vẽ. Mặc định KHÔNG bắt sự kiện
+     chuột/chạm (pointer-events: none) để không cản trở việc kéo/thả chữ
+     ký hay chụm để phóng to như bình thường; chỉ bắt sự kiện khi khung
+     xem trước đang ở chế độ tẩy (class "is-erase-mode" trên previewFrame).
+     Cùng lúc đó, lớp phủ chữ ký cũng tạm ngưng bắt sự kiện để mọi thao tác
+     chạm/kéo trên toàn khung đều dùng để vẽ tẩy, kể cả vùng đang có chữ
+     ký đè lên trên. */
+  .erase-overlay{
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    display: block;
+    pointer-events: none;
+    touch-action: none;
+  }
+  .preview-frame.is-erase-mode .erase-overlay{
+    pointer-events: auto;
+    cursor: crosshair;
+  }
+  .preview-frame.is-erase-mode .sig-overlay{
+    pointer-events: none;
+  }
+
+  .sig-handle{
+    position: absolute;
+    width: 22px;
+    height: 22px;
+    background: var(--accent);
+    border: 2px solid #ffffff;
+    border-radius: 50%;
+    box-shadow: 0 1px 4px rgba(20,60,40,0.35);
+    touch-action: none;
+    /* Chỉ để HIỂN THỊ — không nhận sự kiện chuột/chạm nữa. Toàn bộ việc
+       "đây là kéo di chuyển hay kéo đổi kích thước" giờ được tính bằng
+       khoảng cách tới góc ngay trên chính overlay (xem onOverlayPointerDown
+       trong JS) để không bao giờ bị chồng vùng bắt sự kiện giữa các góc,
+       kể cả khi chữ ký được thu rất nhỏ. */
+    pointer-events: none;
+  }
+  .sig-handle-nw{ top: -11px;    left: -11px;   cursor: nwse-resize; }
+  .sig-handle-ne{ top: -11px;    right: -11px;  cursor: nesw-resize; }
+  .sig-handle-sw{ bottom: -11px; left: -11px;   cursor: nesw-resize; }
+  .sig-handle-se{ bottom: -11px; right: -11px;  cursor: nwse-resize; }
+
+  /* Vùng chạm lớn hơn (44px) cho điểm neo trên thiết bị cảm ứng, không
+     ảnh hưởng tới kích thước hiển thị 22px của chấm tròn. */
+  .sig-handle::before{
+    content: "";
+    position: absolute;
+    top: 50%; left: 50%;
+    width: 44px; height: 44px;
+    transform: translate(-50%, -50%);
+  }
+
+  /* Nút "×" xóa chữ ký — đặt tách hẳn phía trên khung (không nằm ở 4 góc)
+     để không bao giờ đụng vùng bắt sự kiện đổi kích thước, kể cả khi chữ ký
+     rất nhỏ. pointer-events bật riêng vì overlay cha không chặn, còn 4 chấm
+     góc mới là phần tử bị tắt pointer-events. */
+  .sig-delete{
+    position: absolute;
+    top: -34px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--danger);
+    color: #ffffff;
+    border: 2px solid #ffffff;
+    border-radius: 50%;
+    box-shadow: 0 1px 4px rgba(20,60,40,0.35);
+    font-size: 16px;
+    line-height: 1;
+    font-weight: 700;
+    cursor: pointer;
+    pointer-events: auto;
+    touch-action: none;
+  }
+  .sig-delete:hover{ background: #b93636; }
+
+  /* =========================================================
+     3c. BẢNG ĐIỀU KHIỂN CHỮ KÝ — thanh tăng/giảm kích thước + nút 4 hướng
+     để di chuyển vị trí, thay thế/hỗ trợ thêm cho việc kéo thả trực tiếp
+     (tiện khi cần chỉnh thật chính xác hoặc trên màn hình nhỏ khó kéo).
+     ========================================================= */
+  .sig-controls{
+    display: none;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: 10px;
+    padding: 12px;
+    background: var(--bg-shell);
+    border: 1.5px solid var(--border-light);
+    border-radius: var(--radius-md);
+  }
+  .sig-controls.is-visible{ display: flex; }
+
+  .sig-controls-hint{
+    margin: -4px 0 0;
+    font-size: 11.5px;
+    color: var(--text-muted);
+  }
+
+  .sig-preview-btn{
+    width: 100%;
+    min-height: 40px;
+    background: var(--accent-soft);
+    color: var(--accent-strong);
+    border: 1.5px solid var(--border-light);
+    border-radius: var(--radius-sm);
+    font-family: var(--font-ui);
+    font-size: 13.5px;
+    font-weight: 700;
+    cursor: pointer;
+    -webkit-user-select: none;
+    user-select: none;
+    touch-action: manipulation;
+    transition: background .1s ease, color .1s ease;
+  }
+  .sig-preview-btn:active,
+  .sig-preview-btn.is-active{ background: var(--accent); color: #ffffff; }
+
+  /* Chế độ "giữ để xem trước": ẩn viền chấm, 4 nút góc và nút xóa của lớp
+     phủ chữ ký — chỉ còn lại đúng hình ảnh chữ ký ở đúng vị trí/kích thước
+     sẽ xuất ra PDF, để người dùng kiểm tra trước khi lưu. */
+  .sig-overlay.is-previewing{ border-color: transparent; cursor: default; }
+  .sig-overlay.is-previewing .sig-handle,
+  .sig-overlay.is-previewing .sig-delete{ display: none; }
+
+  .sig-controls-row{
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .sig-controls-label{
+    flex-shrink: 0;
+    width: 84px;
+    font-size: 12.5px;
+    font-weight: 700;
+    color: var(--text-secondary);
+    line-height: 1.3;
+  }
+  .sig-controls-value{
+    display: block;
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--accent-strong);
+  }
+
+  /* Điện thoại rất nhỏ (≤380px, ví dụ màn hình gập/điện thoại đời cũ): nhãn
+     cố định 84px cộng với cụm nút bên cạnh (đổi màu, D-pad vị trí...) có
+     thể hơi chật. Xếp nhãn lên trên, cụm nút xuống dưới để mọi thứ vẫn dễ
+     đọc/dễ chạm mà không phải thu nhỏ nút. Không ảnh hưởng tablet/desktop. */
+  @media (max-width: 380px){
+    .sig-controls-row:has(.sig-controls-label){
+      flex-direction: column;
+      align-items: stretch;
+      gap: 6px;
+    }
+    .sig-controls-row .sig-controls-label{ width: auto; }
+  }
+
+  .sig-size-control{
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .sig-size-range{
+    flex: 1;
+    accent-color: var(--accent);
+    height: 4px;
+  }
+
+  .sig-step-btn{
+    flex-shrink: 0;
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--accent-soft);
+    color: var(--accent-strong);
+    border: 1.5px solid var(--border-light);
+    border-radius: 50%;
+    font-size: 18px;
+    font-weight: 700;
+    line-height: 1;
+    cursor: pointer;
+    -webkit-user-select: none;
+    user-select: none;
+    touch-action: manipulation;
+  }
+  .sig-step-btn:active{ background: var(--accent); color: #ffffff; }
+
+  /* =========================================================
+     3b2. CHỌN MÀU MỰC CHỮ KÝ — Gốc / Xanh (bút bi) / Đen đậm
+     ========================================================= */
+  .sig-color-options{
+    flex: 1;
+    display: flex;
+    gap: 6px;
+  }
+  .color-btn{
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    min-height: 32px;
+    padding: 4px 6px;
+    background: var(--accent-soft);
+    color: var(--text-primary);
+    border: 1.5px solid var(--border-light);
+    border-radius: var(--radius-sm);
+    font-family: var(--font-ui);
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    -webkit-user-select: none;
+    user-select: none;
+    touch-action: manipulation;
+    transition: background .1s ease, border-color .1s ease, color .1s ease;
+  }
+  .color-btn.is-active{
+    background: var(--accent);
+    color: #ffffff;
+    border-color: var(--accent);
+  }
+  .color-swatch{
+    width: 13px;
+    height: 13px;
+    border-radius: 50%;
+    border: 1.5px solid rgba(0,0,0,0.15);
+    flex-shrink: 0;
+    background: #4a4a4a;
+  }
+  .color-swatch-original{
+    background: linear-gradient(135deg, #1a1a1a 50%, #b7b7b7 50%);
+  }
+
+  /* =========================================================
+     3b3. BẢNG ĐIỀU KHIỂN "CỤC TẨY" — bật/tắt chế độ vẽ tẩy tự do, chỉnh độ
+     dày nét, hoàn tác/xóa hết. Luôn hiển thị (giống khối chất lượng xuất
+     bên dưới) để dùng được ngay cả khi chưa thêm chữ ký, chỉ cần đã có
+     trang PDF xem trước.
+     ========================================================= */
+  .erase-controls{
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: 10px;
+    padding: 12px;
+    background: var(--bg-shell);
+    border: 1.5px solid var(--border-light);
+    border-radius: var(--radius-md);
+  }
+  .erase-action-row{
+    display: flex;
+    gap: 8px;
+  }
+  .erase-action-btn{
+    flex: 1;
+    min-height: 36px;
+    padding: 4px 6px;
+    background: var(--accent-soft);
+    color: var(--accent-strong);
+    border: 1.5px solid var(--border-light);
+    border-radius: var(--radius-sm);
+    font-family: var(--font-ui);
+    font-size: 12.5px;
+    font-weight: 700;
+    cursor: pointer;
+    -webkit-user-select: none;
+    user-select: none;
+    touch-action: manipulation;
+  }
+  .erase-action-btn:disabled{
+    opacity: .5;
+    cursor: not-allowed;
+  }
+  .erase-action-btn-danger{
+    background: rgba(214,69,69,0.1);
+    color: var(--danger);
+    border-color: rgba(214,69,69,0.35);
+  }
+
+  /* =========================================================
+     3c. CHỌN CHẤT LƯỢNG / DUNG LƯỢNG FILE XUẤT — luôn hiển thị (không phụ
+     thuộc đã có chữ ký hay chưa), mặc định ở mức "Cao" giữ nguyên hành vi
+     xuất file như trước (2480×3508px @300 DPI, JPEG chất lượng 0.92).
+     ========================================================= */
+  .export-quality{
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: 10px;
+    padding: 12px;
+    background: var(--bg-shell);
+    border: 1.5px solid var(--border-light);
+    border-radius: var(--radius-md);
+  }
+  .export-quality-label{
+    margin: 0;
+    font-size: 12.5px;
+    font-weight: 700;
+    color: var(--text-secondary);
+  }
+  .export-quality-options{
+    display: flex;
+    gap: 8px;
+  }
+  .quality-btn{
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    min-height: 48px;
+    padding: 6px 4px;
+    background: var(--accent-soft);
+    color: var(--accent-strong);
+    border: 1.5px solid var(--border-light);
+    border-radius: var(--radius-sm);
+    font-family: var(--font-ui);
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    -webkit-user-select: none;
+    user-select: none;
+    touch-action: manipulation;
+    transition: background .1s ease, color .1s ease, border-color .1s ease;
+  }
+  .quality-btn-sub{
+    font-size: 10.5px;
+    font-weight: 600;
+    opacity: .85;
+  }
+  .quality-btn.is-active{
+    background: var(--accent);
+    color: #ffffff;
+    border-color: var(--accent);
+  }
+  .export-quality-hint{
+    margin: -2px 0 0;
+    font-size: 11.5px;
+    color: var(--text-muted);
+  }
+
+  /* Cụm 4 nút mũi tên xếp hình chữ thập, gọn trong 1 khối vuông nhỏ */
+  .sig-dpad{
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    max-width: 132px;
+  }
+  .sig-dpad-mid{
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .sig-dpad-btn{
+    width: 36px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--accent-soft);
+    color: var(--accent-strong);
+    border: 1.5px solid var(--border-light);
+    border-radius: var(--radius-sm);
+    font-size: 13px;
+    line-height: 1;
+    cursor: pointer;
+    -webkit-user-select: none;
+    user-select: none;
+    touch-action: manipulation;
+  }
+  .sig-dpad-btn:active{ background: var(--accent); color: #ffffff; }
+  .sig-dpad-center{
+    width: 36px;
+    height: 32px;
+  }
+
+  /* =========================================================
+     4. NÚT LƯU THÀNH FILE PDF — dưới cùng
+     ========================================================= */
+  .save-btn{
+    width: 100%;
+    min-height: 52px;
+    background: var(--accent);
+    border: none;
+    border-radius: var(--radius-md);
+    color: #ffffff;
+    font-family: var(--font-ui);
+    font-size: 15.5px;
+    font-weight: 700;
+    letter-spacing: .2px;
+    cursor: pointer;
+    transition: background .15s ease;
+  }
+  .save-btn:hover:not(:disabled){ background: var(--accent-strong); }
+  .save-btn:disabled{
+    background: #cfe4d7;
+    color: #ffffff;
+    cursor: not-allowed;
+  }
+
+  /* Hàng 2 nút lưu (PDF + ảnh JPG) đứng cạnh nhau, chia đều chiều rộng.
+     Nút phụ (JPG) dùng màu nhạt hơn để nút PDF (chính) vẫn nổi bật nhất. */
+  .save-btn-row{
+    display: flex;
+    gap: 10px;
+  }
+  .save-btn-row .save-btn{ flex: 1; }
+  .save-btn-secondary{
+    background: var(--accent-soft);
+    color: var(--accent-strong);
+    border: 1.5px solid var(--border-light);
+  }
+  .save-btn-secondary:hover:not(:disabled){
+    background: var(--accent);
+    color: #ffffff;
+  }
+  .save-btn-secondary:disabled{
+    background: var(--accent-soft);
+    color: var(--text-muted);
+    opacity: .6;
+    cursor: not-allowed;
+  }
+
+  /* =========================================================
+     5. THANH TRẠNG THÁI NHỎ (phục vụ debug bước 1)
+     ========================================================= */
+  .status-line{
+    min-height: 18px;
+    padding: 2px 2px 0;
+    font-size: 12px;
+    color: var(--text-secondary);
+  }
+  .status-line.is-error{ color: var(--danger); }
+
+  input[type="file"]{ display: none; }
+
+  /* =========================================================
+     6. WORKSPACE — khung xem trước + cụm điều khiển
+     Mặc định (điện thoại): xếp dọc, y hệt bố cục gốc.
+     ========================================================= */
+  .workspace{
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    min-width: 0;
+  }
+  .side-panel{
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  /* side-panel kế thừa margin-top của sig-controls gốc; bỏ đi vì gap ở trên đã lo việc giãn cách */
+  .side-panel .sig-controls{ margin-top: 0; }
+
+  /* Trên màn hình rộng, vẫn giữ đúng như khung điện thoại để không lệch trải nghiệm thiết kế */
+  @media (min-width: 520px){
+    body{ display: flex; justify-content: center; }
+    .app{ box-shadow: 0 10px 40px rgba(20,60,40,0.12); }
+  }
+
+  /* =========================================================
+     6c. BỐ CỤC TABLET (600px–859px) — vẫn giữ nguyên 1 cột như điện thoại
+     (không chuyển sang 2 cột, việc đó dành riêng cho bố cục máy tính từ
+     860px trở lên bên dưới), chỉ nới rộng khung ứng dụng một chút để đỡ
+     bị bó hẹp/lãng phí khoảng trống hai bên khi tra cứu trên tablet, giúp
+     khung xem trước PDF và các nút bấm dễ nhìn/dễ chạm hơn. */
+  @media (min-width: 600px) and (max-width: 859px){
+    .app{ max-width: 640px; }
+  }
+
+  /* =========================================================
+     7. BỐ CỤC MÁY TÍNH — từ 860px trở lên: nới rộng khung ứng dụng và
+     chuyển cụm "giữ xem trước / kích thước / vị trí / lưu file" sang
+     đứng thành cột riêng BÊN CẠNH khung xem trước, thay vì nằm dài phía
+     dưới — giúp trang không bị kéo quá dài khi xem trên máy tính.
+     ========================================================= */
+  @media (min-width: 860px){
+    .app{
+      max-width: 900px;
+      box-shadow: 0 10px 40px rgba(20,60,40,0.12);
+    }
+
+    /* 2 nút "Chọn tệp PDF" / "Chọn ảnh chữ ký" đứng cạnh nhau (2 cột) thay
+       vì xếp dọc, tận dụng chiều ngang rộng rãi trên máy tính. */
+    .pick-buttons{
+      flex-direction: row;
+    }
+    .pick-buttons .pick-btn{
+      flex: 1;
+      min-width: 0;
+    }
+
+    .workspace{
+      flex-direction: row;
+      align-items: flex-start;
+      gap: 24px;
+    }
+    /* Chỉ canh cụm điều khiển vào giữa chiều cao trang PDF SAU KHI đã có
+       chữ ký (lúc đó cụm mới hiển thị đủ nội dung); trước đó (chưa chọn
+       ảnh chữ ký, cụm điều khiển đang ẩn) vẫn giữ ở trên như mặc định để
+       không bị trống trải/trôi nổi giữa trang. */
+    .workspace.has-signature{
+      align-items: center;
+    }
+
+    /* Khung xem trước: chiếm phần lớn nhưng có chiều rộng tối đa hợp lý để
+       không bị quá to trên màn hình rất rộng (tỷ lệ A4 vẫn giữ nguyên). */
+    .preview-wrap{
+      flex: 1 1 auto;
+      max-width: 480px;
+    }
+
+    /* Cột điều khiển: chiều rộng cố định, đứng cạnh khung xem trước, và
+       "dính" (sticky) cách mép trên khung cuộn 1 khoảng cố định khi cuộn
+       trang dài, để luôn thấy được các nút điều khiển mà không cần cuộn
+       lên đầu trang.
+       LƯU Ý: TRƯỚC ĐÂY dùng "top: 50%; transform: translateY(-50%)" để
+       canh GIỮA cụm điều khiển theo chiều dọc màn hình — cách này không ổn
+       định vì translateY(-50%) di chuyển lên trên đúng bằng 1 nửa CHIỀU
+       CAO CỦA CHÍNH CỤM ĐIỀU KHIỂN: mỗi khi cụm này cao thêm (ví dụ vừa
+       thêm khối "Cục tẩy"), nó bị đẩy lệch lên cao hơn, có thể trồi hẳn ra
+       ngoài, đè lên tiêu đề hoặc các nút khác phía trên như đã gặp phải.
+       Đổi sang neo cố định "top: 20px" (không dùng transform) để vị trí
+       luôn ổn định, không phụ thuộc cụm điều khiển cao hay thấp. */
+    .side-panel{
+      flex: 0 0 300px;
+      width: 300px;
+      position: sticky;
+      top: 20px;
+    }
+  }
+
+  /* =========================================================
+     X. FOOTER BẢN QUYỀN — chữ mờ, có đổ bóng nhẹ
+     ========================================================= */
+  .app-footer{
+    padding: 18px 16px 22px;
+    text-align: center;
+  }
+  .app-footer p{
+    margin: 2px 0;
+    font-size: 11px;
+    line-height: 1.5;
+    color: var(--text-muted);
+    opacity: 0.55;
+    text-shadow: 0 1px 1px rgba(22,52,42,0.15);
+    letter-spacing: 0.2px;
+  }
+</style>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#2f9e64">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<script>
+  if ('serviceWorker' in navigator && (location.protocol === 'http:' || location.protocol === 'https:')) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('sw.js').catch(() => {
+        // fail-silent: không được làm gãy app nếu đăng ký thất bại
+      });
+    });
+  }
+  // Khi mở qua file:// (location.protocol === 'file:'), bỏ qua hoàn toàn — không gọi register()
+</script>
+</head>
+<body>
+
+<div class="app">
+
+  <header class="app-header">
+    <h1>Chèn chữ ký vào PDF</h1>
+    <p>Chọn tệp PDF và ảnh chữ ký để bắt đầu</p>
+  </header>
+
+  <main class="app-body">
+
+    <!-- 2 nút chọn tệp -->
+    <div class="pick-buttons">
+      <button type="button" class="pick-btn" id="btnPickPdf">
+        <span class="pick-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+            <polyline points="14 2 14 8 20 8"></polyline>
+          </svg>
+        </span>
+        <span class="pick-text">
+          <span class="pick-label">1. Chọn tệp PDF</span>
+          <span class="pick-filename" id="pdfFileName">Chưa chọn tệp nào</span>
+        </span>
+      </button>
+      <input type="file" id="inputPdf" accept="application/pdf,.pdf">
+
+      <button type="button" class="pick-btn" id="btnPickSignature">
+        <span class="pick-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 17s3-1 5-4 3-6 6-6 3 4 5 4 3-2 3-2"></path>
+            <path d="M3 21h18"></path>
+          </svg>
+        </span>
+        <span class="pick-text">
+          <span class="pick-label">2. Chọn ảnh chữ ký</span>
+          <span class="pick-filename" id="signatureFileName">Chưa chọn ảnh nào</span>
+        </span>
+      </button>
+      <input type="file" id="inputSignature" accept="image/*">
+    </div>
+
+    <!-- Nút nhỏ: xóa PDF + chữ ký đang làm việc để bắt đầu văn bản mới,
+         không đụng tới 3 ô chữ ký đã lưu sẵn bên dưới. Chỉ bật khi đang có
+         gì đó để xóa (đã chọn PDF hoặc đã có chữ ký). -->
+    <div class="reset-all-row">
+      <button type="button" class="reset-all-btn" id="btnResetAll" disabled>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 12a9 9 0 1 0 3-6.7"></path>
+          <polyline points="3 4 3 9 8 9"></polyline>
+        </svg>
+        Xóa hết, làm văn bản mới
+      </button>
+    </div>
+
+    <!-- Chữ ký đã lưu sẵn (tối đa 3 ô) — bấm hình để dùng lại ngay, không
+         cần chọn lại tệp ảnh mỗi lần; mỗi ô có nút 💾 lưu chữ ký đang dùng
+         vào đó và nút × xóa chữ ký đã lưu. Lưu bằng localStorage nên chỉ
+         dùng lại được trên cùng máy/cùng trình duyệt đã mở tệp này. -->
+    <div class="sig-slots">
+      <p class="sig-slots-title">Chữ ký đã lưu (bấm để dùng lại)</p>
+      <div class="sig-slots-row" id="sigSlotsRow"></div>
+    </div>
+
+    <!-- Vùng làm việc: khung xem trước bên trái + cụm điều khiển bên phải.
+         Trên điện thoại (mặc định) 2 khối này vẫn xếp dọc như cũ; chỉ trên
+         màn hình rộng (xem @media (min-width: 860px) trong CSS) mới chuyển
+         thành 2 cột nằm cạnh nhau để trang đỡ dài. -->
+    <div class="workspace" id="workspace">
+
+      <!-- Vùng xem trước, tỷ lệ A4 -->
+      <div class="preview-wrap">
+        <p class="preview-title">Xem trước</p>
+        <!-- Bấm đúp (máy tính) hoặc chụm/kéo giãn 2 ngón tay (điện thoại) vào
+             bên trong để phóng to 150–200% giúp chỉnh chữ ký chính xác hơn;
+             khi đã phóng to, khung này cho phép cuộn để xem hết trang. -->
+        <div class="preview-viewport" id="previewViewport">
+        <div class="preview-frame" id="previewFrame">
+          <div class="preview-placeholder" id="previewPlaceholder">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+              <polyline points="14 2 14 8 20 8"></polyline>
+            </svg>
+            <span id="previewPlaceholderText">Chọn tệp PDF ở trên để xem trước tại đây</span>
+          </div>
+          <canvas id="pdfPreviewCanvas"></canvas>
+
+          <!-- Lớp phủ "cục tẩy" — vẽ tự do bằng ngón tay/chuột để phủ trắng
+               lên chữ/chi tiết cần xóa trên trang. Đặt TRƯỚC lớp phủ chữ ký
+               trong mã nguồn để nét tẩy luôn nằm DƯỚI chữ ký khi hiển thị và
+               khi xuất file (giống thứ tự vẽ trong composeFinalCanvas: trang
+               PDF → nét tẩy → chữ ký). -->
+          <canvas class="erase-overlay" id="eraseOverlayCanvas"></canvas>
+
+          <!-- Lớp phủ ảnh chữ ký — kéo thân để di chuyển, kéo 4 điểm neo góc để
+               phóng to/thu nhỏ (giữ nguyên tỷ lệ khung hình). -->
+          <div class="sig-overlay" id="signatureOverlay">
+            <img id="signatureOverlayImg" alt="Chữ ký" draggable="false">
+            <div class="sig-handle sig-handle-nw" data-handle="nw"></div>
+            <div class="sig-handle sig-handle-ne" data-handle="ne"></div>
+            <div class="sig-handle sig-handle-sw" data-handle="sw"></div>
+            <div class="sig-handle sig-handle-se" data-handle="se"></div>
+            <button type="button" class="sig-delete" id="sigDeleteBtn" title="Xóa chữ ký" aria-label="Xóa chữ ký">&times;</button>
+          </div>
+        </div>
+        </div>
+      </div>
+
+      <!-- Cụm điều khiển: giữ xem trước, kích thước, vị trí, trạng thái và
+           nút Lưu — trên desktop đứng thành cột riêng bên cạnh khung xem
+           trước; trên điện thoại vẫn nằm ngay dưới khung xem trước như cũ. -->
+      <div class="side-panel">
+        <div class="sig-controls" id="sigControls">
+          <div class="sig-controls-row sig-preview-row">
+            <button type="button" class="sig-preview-btn" id="sigPreviewBtn">👁 Bấm để xem trước</button>
+          </div>
+          <p class="sig-controls-hint">Bấm nút trên để tạm ẩn khung/nút chỉnh, xem chữ ký đúng như khi in ra PDF. Bấm lại để quay về chỉnh tiếp.</p>
+          <div class="sig-controls-row">
+            <span class="sig-controls-label">Kích thước <span class="sig-controls-value" id="sigSizeValue">30%</span></span>
+            <div class="sig-size-control">
+              <button type="button" class="sig-step-btn" id="sigSizeMinus" aria-label="Giảm kích thước chữ ký">&minus;</button>
+              <input type="range" class="sig-size-range" id="sigSizeRange" min="5" max="30" step="0.1" value="30" aria-label="Kích thước chữ ký">
+              <button type="button" class="sig-step-btn" id="sigSizePlus" aria-label="Tăng kích thước chữ ký">&plus;</button>
+            </div>
+          </div>
+          <!-- Đổi màu mực chữ ký: "Gốc" giữ nguyên như ảnh đã chọn (mặc định,
+               không đổi hành vi cũ); "Xanh"/"Đen" tách nền + tô lại nét mực
+               theo màu đã chọn, xử lý ngay trên canvas nên áp dụng tức thì
+               cho cả khung xem trước lẫn file PDF xuất ra. -->
+          <div class="sig-controls-row">
+            <span class="sig-controls-label">Màu chữ ký</span>
+            <div class="sig-color-options" id="sigColorOptions">
+              <button type="button" class="color-btn is-active" data-color="nguyen-ban" aria-pressed="true" title="Giữ màu như ảnh đã chọn">
+                <span class="color-swatch color-swatch-original"></span>Gốc
+              </button>
+              <button type="button" class="color-btn" data-color="xanh" aria-pressed="false" title="Tô lại nét mực thành xanh bút bi">
+                <span class="color-swatch" style="background:#1a3399"></span>Xanh
+              </button>
+              <button type="button" class="color-btn" data-color="den" aria-pressed="false" title="Tô lại nét mực thành đen đậm">
+                <span class="color-swatch" style="background:#111111"></span>Đen
+              </button>
+            </div>
+          </div>
+          <div class="sig-controls-row">
+            <span class="sig-controls-label">Vị trí</span>
+            <div class="sig-dpad">
+              <button type="button" class="sig-dpad-btn sig-dpad-up" id="sigMoveUp" aria-label="Di chuyển chữ ký lên trên">&#9650;</button>
+              <div class="sig-dpad-mid">
+                <button type="button" class="sig-dpad-btn sig-dpad-left" id="sigMoveLeft" aria-label="Di chuyển chữ ký sang trái">&#9664;</button>
+                <span class="sig-dpad-center" aria-hidden="true"></span>
+                <button type="button" class="sig-dpad-btn sig-dpad-right" id="sigMoveRight" aria-label="Di chuyển chữ ký sang phải">&#9654;</button>
+              </div>
+              <button type="button" class="sig-dpad-btn sig-dpad-down" id="sigMoveDown" aria-label="Di chuyển chữ ký xuống dưới">&#9660;</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Cục tẩy (bút tẩy tự do) — tô/vẽ đè màu trắng lên bất kỳ chữ hay
+             chi tiết nào trên trang xem trước để che đi (số cũ, dấu mộc cũ,
+             ghi chú thừa...) trước khi lưu file. Dùng độc lập với chữ ký:
+             chỉ cần đã có trang PDF xem trước là dùng được. Vẽ theo % của
+             khung xem trước nên luôn khớp đúng vị trí khi xuất ra PDF,
+             giống hệt cách chữ ký hoạt động. -->
+        <div class="erase-controls" id="eraseControls">
+          <div class="sig-controls-row">
+            <button type="button" class="sig-preview-btn" id="eraseToggleBtn" disabled>🧽 Bật bút tẩy</button>
+          </div>
+          <p class="sig-controls-hint">Bấm nút trên rồi tô/vẽ trực tiếp lên vùng chữ hoặc chi tiết cần xóa trên trang xem trước — nét vẽ sẽ phủ trắng đúng chỗ đó khi lưu file. Bấm lại nút để tắt bút tẩy và quay về kéo/chỉnh chữ ký như bình thường.</p>
+          <div class="sig-controls-row">
+            <span class="sig-controls-label">Độ dày nét <span class="sig-controls-value" id="eraseSizeValue">3%</span></span>
+            <div class="sig-size-control">
+              <button type="button" class="sig-step-btn" id="eraseSizeMinus" aria-label="Giảm độ dày nét tẩy">&minus;</button>
+              <input type="range" class="sig-size-range" id="eraseSizeRange" min="1" max="10" step="0.5" value="3" aria-label="Độ dày nét tẩy">
+              <button type="button" class="sig-step-btn" id="eraseSizePlus" aria-label="Tăng độ dày nét tẩy">&plus;</button>
+            </div>
+          </div>
+          <div class="erase-action-row">
+            <button type="button" class="erase-action-btn" id="eraseUndoBtn" disabled>↩ Hoàn tác nét vừa vẽ</button>
+            <button type="button" class="erase-action-btn erase-action-btn-danger" id="eraseClearBtn" disabled>Xóa hết cục tẩy</button>
+          </div>
+        </div>
+
+        <!-- Chọn chất lượng/dung lượng file PDF xuất ra — mặc định "Cao"
+             giữ nguyên hành vi cũ (300 DPI, JPEG 0.92); 2 mức còn lại giảm
+             kích thước ảnh + nén nhiều hơn để có file nhẹ hơn, phù hợp gửi
+             qua email. Luôn hiển thị, không phụ thuộc đã thêm chữ ký hay
+             chưa. -->
+        <div class="export-quality" id="exportQuality">
+          <p class="export-quality-label">Chất lượng file xuất</p>
+          <div class="export-quality-options" id="exportQualityOptions">
+            <button type="button" class="quality-btn is-active" data-quality="cao" aria-pressed="true">
+              Cao<span class="quality-btn-sub">300 DPI</span>
+            </button>
+            <button type="button" class="quality-btn" data-quality="vua" aria-pressed="false">
+              Vừa<span class="quality-btn-sub">200 DPI</span>
+            </button>
+            <button type="button" class="quality-btn" data-quality="nhe" aria-pressed="false">
+              Nhẹ<span class="quality-btn-sub">gửi email</span>
+            </button>
+          </div>
+          <p class="export-quality-hint" id="exportQualityHint">Mức "Cao" giữ nguyên chất lượng như trước. Chọn "Vừa" hoặc "Nhẹ" để file nhỏ hơn, dễ gửi qua email.</p>
+        </div>
+
+        <!-- Trạng thái ngắn gọn phục vụ Bước 1 -->
+        <p class="status-line" id="statusLine"></p>
+
+        <!-- Nút lưu: PDF (chính) và ảnh JPG (phụ) — cùng dùng lại đúng nội
+             dung đã ghép trên khung Xem trước (trang PDF + nét tẩy + chữ
+             ký), chỉ khác định dạng đóng gói cuối cùng. -->
+        <div class="save-btn-row">
+          <button type="button" class="save-btn" id="btnSave" disabled>Lưu thành file PDF</button>
+          <button type="button" class="save-btn save-btn-secondary" id="btnSaveJpg" disabled>Lưu ảnh JPG</button>
+        </div>
+        <p class="export-quality-hint" style="margin-top:-4px;">Mẹo: bấm <b>Ctrl+S</b> để lưu nhanh file PDF, <b>Ctrl+Shift+S</b> để lưu nhanh ảnh JPG — không cần rê chuột xuống nút.</p>
+      </div>
+
+    </div>
+
+  </main>
+
+  <footer class="app-footer">
+    <p>© 2026 Phan Anh Tùng. All Rights Reserved.</p>
+    <p>Developed in September 2026.</p>
+  </footer>
+</div>
+
+<!-- Thư viện pdf.js (Mozilla, mã nguồn mở, giấy phép Apache-2.0) — giữ lại từ
+     phần mềm gốc, dùng để đọc/hiển thị nội dung tệp PDF được chọn ở nút 1.
+     Nếu không tải được (mất mạng, CDN bị chặn…), biến window.pdfjsLib sẽ
+     không tồn tại — các bước sau cần kiểm tra trước khi dùng. -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script>
+(function(){
+  "use strict";
+
+  /* =========================================================
+     0. THAM CHIẾU DOM
+     ========================================================= */
+  const els = {
+    workspace: document.getElementById("workspace"),
+    btnPickPdf: document.getElementById("btnPickPdf"),
+    btnPickSignature: document.getElementById("btnPickSignature"),
+    btnResetAll: document.getElementById("btnResetAll"),
+    inputPdf: document.getElementById("inputPdf"),
+    inputSignature: document.getElementById("inputSignature"),
+    sigSlotsRow: document.getElementById("sigSlotsRow"),
+    pdfFileName: document.getElementById("pdfFileName"),
+    signatureFileName: document.getElementById("signatureFileName"),
+    previewViewport: document.getElementById("previewViewport"),
+    previewFrame: document.getElementById("previewFrame"),
+    previewPlaceholder: document.getElementById("previewPlaceholder"),
+    previewPlaceholderText: document.getElementById("previewPlaceholderText"),
+    pdfPreviewCanvas: document.getElementById("pdfPreviewCanvas"),
+    signatureOverlay: document.getElementById("signatureOverlay"),
+    signatureOverlayImg: document.getElementById("signatureOverlayImg"),
+    sigDeleteBtn: document.getElementById("sigDeleteBtn"),
+    eraseOverlayCanvas: document.getElementById("eraseOverlayCanvas"),
+    eraseControls: document.getElementById("eraseControls"),
+    eraseToggleBtn: document.getElementById("eraseToggleBtn"),
+    eraseSizeRange: document.getElementById("eraseSizeRange"),
+    eraseSizeValue: document.getElementById("eraseSizeValue"),
+    eraseSizeMinus: document.getElementById("eraseSizeMinus"),
+    eraseSizePlus: document.getElementById("eraseSizePlus"),
+    eraseUndoBtn: document.getElementById("eraseUndoBtn"),
+    eraseClearBtn: document.getElementById("eraseClearBtn"),
+    sigControls: document.getElementById("sigControls"),
+    sigPreviewBtn: document.getElementById("sigPreviewBtn"),
+    sigSizeRange: document.getElementById("sigSizeRange"),
+    sigSizeValue: document.getElementById("sigSizeValue"),
+    sigSizeMinus: document.getElementById("sigSizeMinus"),
+    sigSizePlus: document.getElementById("sigSizePlus"),
+    sigColorOptions: document.getElementById("sigColorOptions"),
+    sigMoveUp: document.getElementById("sigMoveUp"),
+    sigMoveDown: document.getElementById("sigMoveDown"),
+    sigMoveLeft: document.getElementById("sigMoveLeft"),
+    sigMoveRight: document.getElementById("sigMoveRight"),
+    btnSave: document.getElementById("btnSave"),
+    btnSaveJpg: document.getElementById("btnSaveJpg"),
+    exportQualityOptions: document.getElementById("exportQualityOptions"),
+    exportQualityHint: document.getElementById("exportQualityHint"),
+    statusLine: document.getElementById("statusLine")
+  };
+
+  /* =========================================================
+     1. THƯ VIỆN pdf.js — nạp worker nếu tải thành công
+     ========================================================= */
+  const pdfjsLibRef = (typeof window.pdfjsLib !== "undefined" && window.pdfjsLib) ? window.pdfjsLib : null;
+  if (pdfjsLibRef){
+    pdfjsLibRef.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+  }
+
+  /* Định dạng cho phép ở từng nút chọn tệp */
+  const ALLOWED_PDF_EXTENSIONS = [".pdf"];
+  const ALLOWED_PDF_MIME_TYPES = ["application/pdf"];
+  const ALLOWED_IMAGE_EXTENSIONS = [".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"];
+
+  /* =========================================================
+     1b. TRẠNG THÁI ĐÃ CHỌN TỆP — khai báo sớm (trước updateResetAllButtonState
+     bên dưới có tham chiếu tới) để tránh phụ thuộc thứ tự khai báo giữa các
+     phần của file, tránh lỗi tiềm ẩn nếu code được chỉnh sửa thêm sau này.
+     ========================================================= */
+  const pickedState = {
+    pdfFile: null,
+    signatureFile: null
+  };
+
+  /* =========================================================
+     2. HÀM TIỆN ÍCH
+     ========================================================= */
+  function setStatus(message, isError){
+    els.statusLine.textContent = message || "";
+    els.statusLine.classList.toggle("is-error", !!isError);
+  }
+
+  function getFileExtension(fileName){
+    const dot = (fileName || "").lastIndexOf(".");
+    return dot >= 0 ? fileName.slice(dot).toLowerCase() : "";
+  }
+
+  function isPdfFile(file){
+    const ext = getFileExtension(file.name);
+    return ALLOWED_PDF_EXTENSIONS.includes(ext) || ALLOWED_PDF_MIME_TYPES.includes(file.type);
+  }
+
+  function isImageFile(file){
+    const ext = getFileExtension(file.name);
+    return (file.type && file.type.startsWith("image/")) || ALLOWED_IMAGE_EXTENSIONS.includes(ext);
+  }
+
+  /* =========================================================
+     2b. ĐỌC & HIỂN THỊ TRANG ĐẦU TIÊN CỦA PDF
+     (lấy lại nguyên vẹn từ mã nguồn gốc — ImageJoiner)
+     ========================================================= */
+
+  /* Đọc 1 File/Blob thành ArrayBuffer dưới dạng Promise — dùng cho
+     decodePdfFirstPage() bên dưới. */
+  function readAsArrayBufferAsync(blob){
+    return new Promise(function(resolve, reject){
+      const reader = new FileReader();
+      reader.onload = function(){ resolve(reader.result); };
+      reader.onerror = function(){ reject(new Error("Không thể đọc dữ liệu tệp.")); };
+      reader.readAsArrayBuffer(blob);
+    });
+  }
+
+  /* Chuyển TRANG ĐẦU TIÊN của 1 tệp PDF thành 1 canvas ảnh. Chỉ lấy trang
+     đầu — nếu PDF có nhiều trang, các trang sau sẽ không được dùng ở
+     Bước 2 này. */
+  function decodePdfFirstPage(file){
+    if (!pdfjsLibRef){
+      return Promise.reject(new Error("Không thể đọc tệp PDF: thiếu thư viện đọc PDF (cần có kết nối mạng khi mở phần mềm). Vui lòng kiểm tra kết nối rồi tải lại trang."));
+    }
+    return readAsArrayBufferAsync(file).then(function(buffer){
+      return pdfjsLibRef.getDocument({ data: buffer }).promise;
+    }).then(function(pdf){
+      return pdf.getPage(1);
+    }).then(function(page){
+      // Quy đổi độ phân giải trang PDF (gốc 72 điểm/inch) sang px ở mức nét
+      // hơn (~200 điểm/inch) để nội dung hiển thị không bị mờ/vỡ nét.
+      const PDF_RENDER_DPI = 200;
+      const scale = PDF_RENDER_DPI / 72;
+      const viewport = page.getViewport({ scale: scale });
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(1, Math.round(viewport.width));
+      canvas.height = Math.max(1, Math.round(viewport.height));
+      const ctx = canvas.getContext("2d");
+      return page.render({ canvasContext: ctx, viewport: viewport }).promise.then(function(){
+        return { source: canvas, width: canvas.width, height: canvas.height, isBitmap: false };
+      });
+    }).catch(function(err){
+      throw new Error(err && err.message ? ("Không thể đọc tệp PDF: " + err.message) : "Không thể đọc tệp PDF.");
+    });
+  }
+
+  /* Vẽ canvas đã render (từ decodePdfFirstPage) lên canvas hiển thị trong
+     khung Xem trước. Đặt lại width/height của #pdfPreviewCanvas theo đúng
+     kích thước trang PDF — CSS (max-width/max-height: 100%) sẽ tự co giãn
+     vừa khung trên màn hình điện thoại mà không làm vỡ bố cục. */
+  function renderPdfPageToPreview(pageResult){
+    const displayCanvas = els.pdfPreviewCanvas;
+    displayCanvas.width = pageResult.width;
+    displayCanvas.height = pageResult.height;
+    const ctx = displayCanvas.getContext("2d");
+    ctx.clearRect(0, 0, displayCanvas.width, displayCanvas.height);
+    ctx.drawImage(pageResult.source, 0, 0);
+
+    els.previewPlaceholder.classList.add("is-hidden");
+    displayCanvas.classList.add("is-visible");
+  }
+
+  function resetPdfPreview(message){
+    els.pdfPreviewCanvas.classList.remove("is-visible");
+    els.previewPlaceholder.classList.remove("is-hidden");
+    if (message) els.previewPlaceholderText.textContent = message;
+  }
+
+  /* Nút "Xóa hết, làm văn bản mới" chỉ có ý nghĩa khi đang có PDF và/hoặc
+     chữ ký đang làm việc — nếu chưa chọn gì thì để mờ/không bấm được. */
+  function updateResetAllButtonState(){
+    els.btnResetAll.disabled = !(pickedState.pdfFile || sigState.loaded);
+  }
+
+  /* =========================================================
+     2c. EXIF ORIENTATION CHO ẢNH CHỮ KÝ
+     (lấy lại nguyên vẹn từ mã nguồn gốc — ImageJoiner) — đảm bảo ảnh chữ ký
+     chụp bằng điện thoại (JPEG có thẻ Orientation) không bị hiển thị xoay
+     ngang/lộn ngược trên lớp phủ.
+     ========================================================= */
+  function readExifOrientation(file, callback){
+    const DEFAULT_ORIENTATION = 1;
+
+    if (!file || file.type !== "image/jpeg"){
+      callback(DEFAULT_ORIENTATION);
+      return;
+    }
+
+    const reader = new FileReader();
+
+    reader.onload = function(event){
+      try{
+        const view = new DataView(event.target.result);
+
+        if (view.getUint16(0, false) !== 0xFFD8){
+          callback(DEFAULT_ORIENTATION);
+          return;
+        }
+
+        let offset = 2;
+        const length = view.byteLength;
+
+        while (offset < length){
+          const marker = view.getUint16(offset, false);
+          offset += 2;
+
+          if (marker === 0xFFE1){
+            if (view.getUint32(offset + 2, false) !== 0x45786966){
+              callback(DEFAULT_ORIENTATION);
+              return;
+            }
+
+            const tiffOffset = offset + 8;
+            const little = view.getUint16(tiffOffset, false) === 0x4949;
+            const firstIFDOffset = view.getUint32(tiffOffset + 4, little);
+            const dirStart = tiffOffset + firstIFDOffset;
+            const entryCount = view.getUint16(dirStart, little);
+
+            for (let i = 0; i < entryCount; i++){
+              const entryOffset = dirStart + 2 + i * 12;
+              const tag = view.getUint16(entryOffset, little);
+              if (tag === 0x0112){ // Thẻ Orientation
+                const value = view.getUint16(entryOffset + 8, little);
+                callback(value >= 1 && value <= 8 ? value : DEFAULT_ORIENTATION);
+                return;
+              }
+            }
+            callback(DEFAULT_ORIENTATION);
+            return;
+          } else if ((marker & 0xFF00) !== 0xFF00){
+            break;
+          } else {
+            offset += view.getUint16(offset, false);
+          }
+        }
+        callback(DEFAULT_ORIENTATION);
+      } catch (err){
+        callback(DEFAULT_ORIENTATION);
+      }
+    };
+
+    reader.onerror = function(){ callback(DEFAULT_ORIENTATION); };
+    reader.readAsArrayBuffer(file.slice(0, 256 * 1024));
+  }
+
+  /* Áp dụng ma trận biến đổi tương ứng với từng giá trị Orientation
+     (1–8 theo chuẩn EXIF/TIFF) lên ngữ cảnh canvas trước khi vẽ ảnh */
+  function applyExifTransform(ctx, orientation, naturalWidth, naturalHeight){
+    switch (orientation){
+      case 2: ctx.transform(-1, 0, 0, 1, naturalWidth, 0); break;
+      case 3: ctx.transform(-1, 0, 0, -1, naturalWidth, naturalHeight); break;
+      case 4: ctx.transform(1, 0, 0, -1, 0, naturalHeight); break;
+      case 5: ctx.transform(0, 1, 1, 0, 0, 0); break;
+      case 6: ctx.transform(0, 1, -1, 0, naturalHeight, 0); break;
+      case 7: ctx.transform(0, -1, -1, 0, naturalHeight, naturalWidth); break;
+      case 8: ctx.transform(0, -1, 1, 0, 0, naturalWidth); break;
+      default: break;
+    }
+  }
+
+  /* Giải mã tệp ảnh chữ ký thành 1 nguồn vẽ được (bitmap hoặc <img>), ép
+     imageOrientation:"none" để không bị trình duyệt tự xoay 2 lần (một lần
+     tự động + một lần thủ công qua applyExifTransform bên dưới). */
+  function decodeSignatureSource(file){
+    if (typeof createImageBitmap === "function"){
+      return createImageBitmap(file, { imageOrientation: "none" }).catch(function(){
+        return createImageBitmap(file);
+      }).then(function(bitmap){
+        return { source: bitmap, width: bitmap.width, height: bitmap.height, isBitmap: true };
+      });
+    }
+    return new Promise(function(resolve, reject){
+      const objectUrl = URL.createObjectURL(file);
+      const img = new Image();
+      try{ img.style.imageOrientation = "none"; }catch(e){}
+      img.onload = function(){
+        resolve({ source: img, width: img.naturalWidth, height: img.naturalHeight, isBitmap: false, objectUrl: objectUrl });
+      };
+      img.onerror = function(){
+        URL.revokeObjectURL(objectUrl);
+        reject(new Error("Không thể giải mã tệp ảnh chữ ký."));
+      };
+      img.src = objectUrl;
+    });
+  }
+
+  /* Kết hợp readExifOrientation + applyExifTransform (như normalizeImageOrientation
+     ở mã gốc) để vẽ ảnh chữ ký lên 1 canvas đã xoay đúng chiều, dùng làm
+     nguồn hiển thị cho lớp phủ. */
+  // Giới hạn hợp lý cho cạnh dài nhất của ảnh chữ ký sau khi đã xoay đúng
+  // chiều: ảnh chụp bằng camera điện thoại hiện nay thường lên tới
+  // 3000–4000px một chiều, trong khi chữ ký khi xuất file (kể cả ở mức
+  // "Cao" 2480×3508px) chỉ hiển thị tối đa ~30% chiều rộng trang, tức
+  // khoảng 750px — 1600px vẫn dư sức nét ở mọi mức chất lượng xuất hiện có,
+  // không làm giảm chất lượng nhìn thấy được, trong khi giảm đáng kể thời
+  // gian xử lý (tô màu, lưu ô nhớ) và bộ nhớ dùng cho các ảnh gốc rất lớn.
+  const MAX_SIGNATURE_SOURCE_PX = 1600;
+
+  function normalizeSignatureOrientation(file){
+    return new Promise(function(resolve, reject){
+      readExifOrientation(file, function(orientation){
+        decodeSignatureSource(file).then(function(decoded){
+          const isRotated90 = (orientation >= 5 && orientation <= 8);
+          const outputWidth = isRotated90 ? decoded.height : decoded.width;
+          const outputHeight = isRotated90 ? decoded.width : decoded.height;
+
+          const canvas = document.createElement("canvas");
+          canvas.width = outputWidth;
+          canvas.height = outputHeight;
+          const ctx = canvas.getContext("2d");
+
+          applyExifTransform(ctx, orientation, decoded.width, decoded.height);
+          ctx.drawImage(decoded.source, 0, 0);
+
+          if (decoded.isBitmap && typeof decoded.source.close === "function"){
+            decoded.source.close();
+          } else if (decoded.objectUrl){
+            URL.revokeObjectURL(decoded.objectUrl);
+          }
+
+          // Thu nhỏ bớt nếu ảnh gốc (đã xoay đúng chiều) vượt quá giới hạn ở
+          // trên — xem giải thích ở MAX_SIGNATURE_SOURCE_PX.
+          const longSide = Math.max(outputWidth, outputHeight);
+          if (longSide > MAX_SIGNATURE_SOURCE_PX){
+            const shrink = MAX_SIGNATURE_SOURCE_PX / longSide;
+            const smallWidth = Math.max(1, Math.round(outputWidth * shrink));
+            const smallHeight = Math.max(1, Math.round(outputHeight * shrink));
+            const smallCanvas = document.createElement("canvas");
+            smallCanvas.width = smallWidth;
+            smallCanvas.height = smallHeight;
+            smallCanvas.getContext("2d").drawImage(canvas, 0, 0, smallWidth, smallHeight);
+            resolve({ canvas: smallCanvas, width: smallWidth, height: smallHeight, orientation: orientation });
+            return;
+          }
+
+          resolve({ canvas: canvas, width: outputWidth, height: outputHeight, orientation: orientation });
+        }).catch(reject);
+      });
+    });
+  }
+
+  /* =========================================================
+     2d. LỚP PHỦ ẢNH CHỮ KÝ — vị trí/kích thước lưu theo % so với khung
+     Xem trước (previewFrame), để tự thích ứng khi khung đổi kích thước
+     (xoay máy, đổi cỡ cửa sổ). Chiều cao được suy ra từ chiều rộng và tỉ
+     lệ khung hình gốc của ảnh chữ ký để LUÔN giữ đúng tỷ lệ.
+     ========================================================= */
+  const sigState = {
+    loaded: false,
+    rawCanvas: null, // canvas gốc CHƯA tô màu (đúng như ảnh đã chọn/EXIF đã chỉnh), dùng để tô lại màu khi đổi lựa chọn mà không cần chọn lại ảnh
+    tintedCanvas: null, // canvas ĐÃ tô màu theo colorKey hiện tại (dùng để xuất file — xem renderSignatureColor/composeFinalCanvas)
+    colorKey: "nguyen-ban", // "nguyen-ban" | "xanh" | "den" — mặc định giữ nguyên như trước khi có tính năng này
+    aspect: 1,     // width / height của ảnh chữ ký đã chuẩn hoá EXIF
+    xPct: 35,       // vị trí góc trên-trái, % theo chiều rộng khung
+    yPct: 70,       // vị trí góc trên-trái, % theo chiều cao khung
+    wPct: 30        // chiều rộng, % theo chiều rộng khung
+  };
+
+  /* Ghi nhớ vị trí + kích thước chữ ký lần chỉnh gần nhất (localStorage),
+     để lần mở tệp sau (hoặc thêm chữ ký tiếp theo) tự áp dụng lại, đỡ phải
+     kéo/chỉnh lại từ đầu mỗi lần. Ghi có debounce 300ms vì hàm này được
+     gọi liên tục trong lúc kéo/resize bằng chuột. */
+  const SIG_TRANSFORM_STORAGE_KEY = "chenChuKyPdf.viTriKichThuoc.v1";
+  let saveTransformTimer = null;
+  function saveLastTransform(){
+    if (saveTransformTimer) clearTimeout(saveTransformTimer);
+    saveTransformTimer = setTimeout(function(){
+      try{
+        localStorage.setItem(SIG_TRANSFORM_STORAGE_KEY, JSON.stringify({
+          wPct: sigState.wPct, xPct: sigState.xPct, yPct: sigState.yPct
+        }));
+      } catch(e){ /* bỏ qua nếu trình duyệt chặn localStorage */ }
+    }, 300);
+  }
+  function loadLastTransform(){
+    try{
+      const raw = localStorage.getItem(SIG_TRANSFORM_STORAGE_KEY);
+      if (!raw) return null;
+      const data = JSON.parse(raw);
+      if (
+        typeof data.wPct === "number" && typeof data.xPct === "number" && typeof data.yPct === "number" &&
+        isFinite(data.wPct) && isFinite(data.xPct) && isFinite(data.yPct)
+      ){
+        return {
+          wPct: clamp(data.wPct, 3, 100),
+          xPct: clamp(data.xPct, 0, 100),
+          yPct: clamp(data.yPct, 0, 100)
+        };
+      }
+    } catch(e){ /* dữ liệu hỏng thì bỏ qua, dùng vị trí mặc định */ }
+    return null;
+  }
+
+  function renderSignatureOverlay(){
+    if (!sigState.loaded) return;
+    const rect = els.previewFrame.getBoundingClientRect();
+    const widthPx = (sigState.wPct / 100) * rect.width;
+    const heightPx = widthPx / sigState.aspect;
+
+    els.signatureOverlay.style.left = sigState.xPct + "%";
+    els.signatureOverlay.style.top = sigState.yPct + "%";
+    els.signatureOverlay.style.width = sigState.wPct + "%";
+    els.signatureOverlay.style.height = heightPx + "px";
+
+    // Đồng bộ thanh trượt kích thước dù wPct vừa đổi từ nguồn nào (kéo góc
+    // trực tiếp, nút +/-, hay chính thanh trượt) để luôn khớp với hình thật.
+    els.sigSizeRange.value = sigState.wPct;
+    els.sigSizeValue.textContent = Math.round(sigState.wPct) + "%";
+
+    saveLastTransform();
+  }
+
+  /* Tô lại nét mực của ảnh chữ ký theo màu đã chọn, đồng thời tách nền
+     trắng/xám (thay cho cách "mix-blend-mode/multiply" tạm thời trước đây):
+     độ tối của từng điểm ảnh gốc (luminance) quyết định độ đục (alpha) của
+     điểm mực màu mới — điểm càng tối (nét mực) càng đục, điểm càng sáng
+     (nền giấy) càng trong suốt. Với "nguyen-ban" thì trả về nguyên canvas
+     gốc, không xử lý gì (giữ đúng hành vi như trước khi có tính năng này).
+     rawCanvas KHÔNG bị sửa đổi — luôn trả về canvas MỚI để giữ ảnh gốc
+     dùng lại được khi người dùng đổi màu qua lại. */
+  const SIGNATURE_TINTS = {
+    xanh: [26, 51, 153],  // xanh mực bút bi thường dùng
+    den:  [17, 17, 17]    // đen đậm
+  };
+  function tintSignatureCanvas(rawCanvas, colorKey){
+    const tint = SIGNATURE_TINTS[colorKey];
+    if (!tint) return rawCanvas; // "nguyen-ban" (hoặc giá trị lạ) — giữ nguyên ảnh gốc
+
+    const w = rawCanvas.width, h = rawCanvas.height;
+    const out = document.createElement("canvas");
+    out.width = w;
+    out.height = h;
+    const octx = out.getContext("2d");
+    octx.drawImage(rawCanvas, 0, 0);
+
+    const imgData = octx.getImageData(0, 0, w, h);
+    const data = imgData.data;
+    for (let i = 0; i < data.length; i += 4){
+      const luminance = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+      const inkAlpha = Math.max(0, Math.min(255, 255 - luminance));
+      data[i]     = tint[0];
+      data[i + 1] = tint[1];
+      data[i + 2] = tint[2];
+      data[i + 3] = Math.round((inkAlpha * data[i + 3]) / 255); // nhân thêm alpha gốc nếu ảnh đã có vùng trong suốt sẵn
+    }
+    octx.putImageData(imgData, 0, 0);
+    return out;
+  }
+
+  /* Dựng lại ảnh hiển thị trên lớp phủ (#signatureOverlayImg) từ
+     sigState.rawCanvas + sigState.colorKey hiện tại — gọi lại mỗi khi đổi
+     lựa chọn màu, không cần chọn lại tệp ảnh. */
+  function renderSignatureColor(){
+    if (!sigState.rawCanvas) return;
+    const tinted = tintSignatureCanvas(sigState.rawCanvas, sigState.colorKey);
+    // Giữ lại canvas đã tô màu để composeFinalCanvas() vẽ trực tiếp từ đây
+    // khi xuất file, thay vì phải đọc lại từ thẻ <img> bên dưới (được gán
+    // qua data URL, việc giải mã ảnh có thể chưa xong ngay lập tức) — tránh
+    // trường hợp hiếm gặp: vừa đổi màu xong bấm "Lưu" ngay thì ảnh xuất ra
+    // có thể chưa kịp cập nhật màu mới.
+    sigState.tintedCanvas = tinted;
+    els.signatureOverlayImg.src = tinted.toDataURL("image/png");
+  }
+
+  /* Áp dụng 1 ảnh chữ ký (canvas đã chuẩn hoá EXIF, CHƯA tô màu) lên lớp
+     phủ — dùng chung cho cả 2 nguồn: (1) vừa chọn tệp ảnh mới, và (2) bấm
+     dùng lại 1 chữ ký đã lưu sẵn ở ô nhớ. */
+  function applySignatureImage(rawCanvas, aspect){
+    sigState.loaded = true;
+    sigState.rawCanvas = rawCanvas;
+    sigState.aspect = aspect;
+
+    // Vị trí/kích thước mặc định: canh giữa theo chiều ngang, gần phía dưới
+    // khung — vị trí thường gặp của chữ ký trên văn bản.
+    const rect = els.previewFrame.getBoundingClientRect();
+    sigState.wPct = 30;
+    const heightPct = ((sigState.wPct / 100) * rect.width / sigState.aspect) / rect.height * 100;
+    sigState.xPct = (100 - sigState.wPct) / 2;
+    sigState.yPct = Math.max(2, 100 - heightPct - 6);
+
+    // Nếu trước đó người dùng từng chỉnh vị trí/kích thước, dùng lại đúng
+    // như lần gần nhất thay cho vị trí mặc định ở trên.
+    const lastTransform = loadLastTransform();
+    if (lastTransform){
+      sigState.wPct = lastTransform.wPct;
+      sigState.xPct = lastTransform.xPct;
+      sigState.yPct = lastTransform.yPct;
+    }
+
+    renderSignatureColor();
+    els.signatureOverlay.classList.add("is-visible");
+    els.sigControls.classList.add("is-visible");
+    els.workspace.classList.add("has-signature");
+    renderSignatureOverlay();
+    updateResetAllButtonState();
+  }
+
+  function showSignatureOverlay(canvas, width, height){
+    applySignatureImage(canvas, width / height);
+  }
+
+  /* Xóa chữ ký hiện tại (lỡ chọn nhầm ảnh) để chọn lại ảnh khác từ đầu:
+     ẩn lớp phủ, reset trạng thái, reset lại nút "2. Chọn ảnh chữ ký" và ô
+     chọn tệp (để chọn lại đúng tệp cũ vẫn kích hoạt được sự kiện change). */
+  function removeSignatureOverlay(){
+    if (!sigState.loaded) return;
+    sigState.loaded = false;
+    sigState.rawCanvas = null;
+    sigState.tintedCanvas = null;
+    dragCtx = null;
+    els.signatureOverlay.classList.remove("is-visible");
+    els.signatureOverlay.classList.remove("is-previewing");
+    els.sigControls.classList.remove("is-visible");
+    els.workspace.classList.remove("has-signature");
+    els.sigPreviewBtn.classList.remove("is-active");
+    els.sigPreviewBtn.textContent = "👁 Bấm để xem trước";
+    els.signatureOverlayImg.src = "";
+    els.inputSignature.value = "";
+    pickedState.signatureFile = null;
+    els.signatureFileName.textContent = "Chưa chọn ảnh nào";
+    els.btnPickSignature.classList.remove("is-done");
+    setStatus("Đã xóa chữ ký. Vui lòng chọn ảnh chữ ký khác.");
+    updateResetAllButtonState();
+  }
+
+  function onDeleteSignatureTrigger(e){
+    e.preventDefault();
+    e.stopPropagation(); // không để sự kiện nổi lên overlay (tránh bị hiểu thành kéo di chuyển/đổi kích thước)
+    removeSignatureOverlay();
+  }
+
+  els.sigDeleteBtn.addEventListener("mousedown", function(e){ e.stopPropagation(); });
+  els.sigDeleteBtn.addEventListener("click", onDeleteSignatureTrigger);
+  els.sigDeleteBtn.addEventListener("touchstart", onDeleteSignatureTrigger, { passive: false });
+
+  /* =========================================================
+     2f. CHỮ KÝ ĐÃ LƯU SẴN (tối đa 3 ô) — lưu bằng localStorage của trình
+     duyệt (theo đúng đường dẫn tệp .html này) để lần sau mở lại tệp trên
+     cùng máy vẫn dùng lại được ngay, không cần chọn lại ảnh từ đầu.
+     ========================================================= */
+  const SIG_SLOT_COUNT = 3;
+  const SIG_SLOT_MAX_SIDE_PX = 600; // thu nhỏ ảnh trước khi lưu để tiết kiệm dung lượng
+  const SIG_SLOTS_STORAGE_KEY = "chenChuKyPdf.chuKyDaLuu.v1";
+
+  function loadSigSlotsFromStorage(){
+    try{
+      const raw = localStorage.getItem(SIG_SLOTS_STORAGE_KEY);
+      const parsed = raw ? JSON.parse(raw) : [];
+      const arr = Array.isArray(parsed) ? parsed.slice(0, SIG_SLOT_COUNT) : [];
+      while (arr.length < SIG_SLOT_COUNT) arr.push(null);
+      return arr;
+    } catch (e){
+      return new Array(SIG_SLOT_COUNT).fill(null);
+    }
+  }
+
+  function saveSigSlotsToStorage(){
+    try{
+      localStorage.setItem(SIG_SLOTS_STORAGE_KEY, JSON.stringify(sigSlots));
+      return true;
+    } catch (e){
+      setStatus("Không thể lưu chữ ký vào bộ nhớ trình duyệt trên máy này (có thể do dung lượng đầy hoặc trình duyệt chặn lưu trữ).", true);
+      return false;
+    }
+  }
+
+  let sigSlots = loadSigSlotsFromStorage();
+
+  function renderSigSlotsThumbnails(){
+    const slotEls = els.sigSlotsRow.children;
+    for (let i = 0; i < SIG_SLOT_COUNT; i++){
+      const slotEl = slotEls[i];
+      if (!slotEl) continue;
+      const thumb = slotEl.querySelector(".sig-slot-thumb");
+      const label = slotEl.querySelector(".sig-slot-label");
+      const clearBtn = slotEl.querySelector(".sig-slot-clear");
+      const data = sigSlots[i];
+      if (data && data.dataUrl){
+        thumb.style.backgroundImage = "url(" + data.dataUrl + ")";
+        thumb.classList.add("has-image");
+        thumb.textContent = "";
+        label.textContent = "Ô " + (i + 1);
+        clearBtn.style.display = "";
+      } else {
+        thumb.style.backgroundImage = "none";
+        thumb.classList.remove("has-image");
+        thumb.textContent = "+";
+        label.textContent = "Ô " + (i + 1) + ": trống";
+        clearBtn.style.display = "none";
+      }
+    }
+  }
+
+  /* Tải 1 dataURL (ảnh chữ ký đã lưu ở ô nhớ) thành 1 canvas — dùng làm
+     "ảnh gốc chưa tô màu" (sigState.rawCanvas) để có thể tô lại theo đúng
+     lựa chọn màu (Gốc/Xanh/Đen) đang chọn, giống hệt luồng vừa chọn tệp
+     ảnh mới. */
+  function dataUrlToCanvas(dataUrl){
+    return new Promise(function(resolve, reject){
+      const img = new Image();
+      img.onload = function(){
+        const canvas = document.createElement("canvas");
+        canvas.width = img.naturalWidth;
+        canvas.height = img.naturalHeight;
+        canvas.getContext("2d").drawImage(img, 0, 0);
+        resolve(canvas);
+      };
+      img.onerror = function(){ reject(new Error("Không thể tải chữ ký đã lưu.")); };
+      img.src = dataUrl;
+    });
+  }
+
+  function useSigSlot(index){
+    const data = sigSlots[index];
+    if (!data || !data.dataUrl){
+      setStatus("Ô " + (index + 1) + " chưa lưu chữ ký nào — bấm nút 💾 trên 1 chữ ký đang dùng để lưu vào đây.", true);
+      return;
+    }
+    dataUrlToCanvas(data.dataUrl).then(function(rawCanvas){
+      applySignatureImage(rawCanvas, data.aspect);
+      pickedState.signatureFile = null;
+      els.signatureFileName.textContent = "Chữ ký đã lưu (ô " + (index + 1) + ")";
+      els.btnPickSignature.classList.add("is-done");
+      setStatus("Đã dùng chữ ký đã lưu ở ô " + (index + 1) + ".");
+    }).catch(function(err){
+      setStatus(err && err.message ? err.message : "Không thể dùng chữ ký đã lưu.", true);
+    });
+  }
+
+  function saveCurrentSignatureToSlot(index){
+    if (!sigState.loaded || !sigState.rawCanvas){
+      setStatus("Chưa có chữ ký đang dùng để lưu — hãy chọn ảnh chữ ký trước.", true);
+      return;
+    }
+    const rawCanvas = sigState.rawCanvas;
+    const naturalW = rawCanvas.width || 1;
+    const naturalH = rawCanvas.height || 1;
+    const scale = Math.min(1, SIG_SLOT_MAX_SIDE_PX / Math.max(naturalW, naturalH));
+    const outW = Math.max(1, Math.round(naturalW * scale));
+    const outH = Math.max(1, Math.round(naturalH * scale));
+
+    const canvas = document.createElement("canvas");
+    canvas.width = outW;
+    canvas.height = outH;
+    // Lưu từ rawCanvas (ẢNH GỐC CHƯA tô màu), không phải ảnh đang hiển thị
+    // trên lớp phủ — để lần dùng lại sau vẫn tô màu đúng theo lựa chọn tại
+    // thời điểm đó, thay vì bị "đóng cứng" theo màu lúc lưu.
+    canvas.getContext("2d").drawImage(rawCanvas, 0, 0, outW, outH);
+
+    let dataUrl;
+    try{
+      dataUrl = canvas.toDataURL("image/png");
+    } catch (e){
+      setStatus("Không thể xử lý ảnh chữ ký để lưu.", true);
+      return;
+    }
+
+    sigSlots[index] = { dataUrl: dataUrl, aspect: sigState.aspect };
+    renderSigSlotsThumbnails();
+    if (saveSigSlotsToStorage()){
+      setStatus("Đã lưu chữ ký hiện tại vào ô " + (index + 1) + ".");
+    }
+  }
+
+  function clearSigSlot(index){
+    if (!sigSlots[index]) return;
+    sigSlots[index] = null;
+    renderSigSlotsThumbnails();
+    saveSigSlotsToStorage();
+    setStatus("Đã xóa chữ ký đã lưu ở ô " + (index + 1) + ".");
+  }
+
+  function buildSigSlotsUI(){
+    els.sigSlotsRow.innerHTML = "";
+    for (let i = 0; i < SIG_SLOT_COUNT; i++){
+      const wrap = document.createElement("div");
+      wrap.className = "sig-slot";
+
+      const mainBtn = document.createElement("button");
+      mainBtn.type = "button";
+      mainBtn.className = "sig-slot-main";
+      mainBtn.setAttribute("aria-label", "Dùng chữ ký đã lưu ô " + (i + 1));
+
+      const thumb = document.createElement("span");
+      thumb.className = "sig-slot-thumb";
+
+      const label = document.createElement("span");
+      label.className = "sig-slot-label";
+
+      mainBtn.appendChild(thumb);
+      mainBtn.appendChild(label);
+
+      const actions = document.createElement("div");
+      actions.className = "sig-slot-actions";
+
+      const saveBtn = document.createElement("button");
+      saveBtn.type = "button";
+      saveBtn.className = "sig-slot-mini-btn sig-slot-save";
+      saveBtn.title = "Lưu chữ ký hiện tại vào ô " + (i + 1);
+      saveBtn.setAttribute("aria-label", saveBtn.title);
+      saveBtn.textContent = "💾";
+
+      const clearBtn = document.createElement("button");
+      clearBtn.type = "button";
+      clearBtn.className = "sig-slot-mini-btn sig-slot-clear";
+      clearBtn.title = "Xóa chữ ký đã lưu ở ô " + (i + 1);
+      clearBtn.setAttribute("aria-label", clearBtn.title);
+      clearBtn.textContent = "×";
+
+      actions.appendChild(saveBtn);
+      actions.appendChild(clearBtn);
+
+      wrap.appendChild(mainBtn);
+      wrap.appendChild(actions);
+      els.sigSlotsRow.appendChild(wrap);
+
+      (function(idx){
+        mainBtn.addEventListener("click", function(){ useSigSlot(idx); });
+        saveBtn.addEventListener("click", function(e){ e.stopPropagation(); saveCurrentSignatureToSlot(idx); });
+        clearBtn.addEventListener("click", function(e){ e.stopPropagation(); clearSigSlot(idx); });
+      })(i);
+    }
+    renderSigSlotsThumbnails();
+  }
+
+  buildSigSlotsUI();
+
+  /* =========================================================
+     2e. BẢNG ĐIỀU KHIỂN CHỮ KÝ — thanh tăng/giảm kích thước + 4 nút hướng,
+     dùng chung hệ toạ độ % (xPct/yPct/wPct) với thao tác kéo thả ở trên,
+     nên luôn khớp nhau dù chỉnh bằng cách nào.
+     ========================================================= */
+  const SIG_SIZE_MIN_PCT = 5;
+  const SIG_SIZE_MAX_PCT = 30;
+  const SIG_SIZE_STEP_PCT = 0.1;
+  const SIG_MOVE_STEP_PCT = 0.1;
+
+  /* Giữ chữ ký luôn nằm trọn trong khung Xem trước sau khi đổi kích thước
+     hoặc di chuyển bằng nút bấm (không để lệch ra ngoài khung). */
+  function clampSignaturePosition(){
+    const rect = els.previewFrame.getBoundingClientRect();
+    const widthPx = (sigState.wPct / 100) * rect.width;
+    const heightPx = widthPx / sigState.aspect;
+    const maxXPct = Math.max(0, 100 - (widthPx / rect.width) * 100);
+    const maxYPct = Math.max(0, 100 - (heightPx / rect.height) * 100);
+    sigState.xPct = clamp(sigState.xPct, 0, maxXPct);
+    sigState.yPct = clamp(sigState.yPct, 0, maxYPct);
+  }
+
+  /* Di chuyển chữ ký bằng nút 4 hướng — mỗi lần bấm dịch 1 bước nhỏ theo %
+     khung Xem trước. */
+  function moveSignatureByStep(dxPct, dyPct){
+    if (!sigState.loaded) return;
+    sigState.xPct += dxPct;
+    sigState.yPct += dyPct;
+    clampSignaturePosition();
+    renderSignatureOverlay();
+  }
+
+  /* Đổi kích thước chữ ký bằng thanh trượt hoặc nút +/- — dùng chung wPct %
+     như khi kéo góc, nên luôn giữ đúng tỷ lệ khung hình gốc. */
+  function setSignatureSize(newWPct){
+    if (!sigState.loaded) return;
+    sigState.wPct = clamp(newWPct, SIG_SIZE_MIN_PCT, SIG_SIZE_MAX_PCT);
+    clampSignaturePosition();
+    renderSignatureOverlay();
+  }
+
+  /* Bấm giữ để lặp lại thao tác (kiểu nút chỉnh âm lượng): bấm 1 cái chạy
+     ngay 1 bước, giữ lâu hơn ~400ms thì tự lặp lại liên tục tới khi nhả ra —
+     dùng cho cả 4 nút hướng lẫn 2 nút +/- kích thước, trên cả chuột và
+     cảm ứng. */
+  function bindRepeatButton(btn, action){
+    let delayId = null, intervalId = null;
+    function stop(){
+      clearTimeout(delayId); clearInterval(intervalId);
+      delayId = null; intervalId = null;
+    }
+    function start(e){
+      e.preventDefault();
+      action();
+      stop();
+      delayId = setTimeout(function(){
+        intervalId = setInterval(action, 60);
+      }, 400);
+    }
+    btn.addEventListener("mousedown", start);
+    btn.addEventListener("touchstart", start, { passive: false });
+    btn.addEventListener("mouseup", stop);
+    btn.addEventListener("mouseleave", stop);
+    btn.addEventListener("touchend", stop);
+    btn.addEventListener("touchcancel", stop);
+  }
+
+  bindRepeatButton(els.sigMoveUp,    function(){ moveSignatureByStep(0, -SIG_MOVE_STEP_PCT); });
+  bindRepeatButton(els.sigMoveDown,  function(){ moveSignatureByStep(0,  SIG_MOVE_STEP_PCT); });
+  bindRepeatButton(els.sigMoveLeft,  function(){ moveSignatureByStep(-SIG_MOVE_STEP_PCT, 0); });
+  bindRepeatButton(els.sigMoveRight, function(){ moveSignatureByStep(SIG_MOVE_STEP_PCT, 0); });
+  bindRepeatButton(els.sigSizeMinus, function(){ setSignatureSize(sigState.wPct - SIG_SIZE_STEP_PCT); });
+  bindRepeatButton(els.sigSizePlus,  function(){ setSignatureSize(sigState.wPct + SIG_SIZE_STEP_PCT); });
+
+  els.sigSizeRange.addEventListener("input", function(){
+    setSignatureSize(parseFloat(els.sigSizeRange.value));
+  });
+
+  /* "Xem trước": bấm 1 cái để BẬT — ẩn tạm viền chấm/4 chấm góc/nút xóa của
+     lớp phủ để nhìn thấy đúng hình chữ ký sẽ nằm ở vị trí nào khi xuất PDF;
+     bấm lại (hoặc bấm bất kỳ đâu khác trên khung xem trước / bắt đầu kéo)
+     để TẮT, quay về chỉnh tiếp như cũ. Đổi từ "giữ nút" sang "bấm để bật/
+     tắt" để đỡ mỏi tay khi cần ngắm lâu. */
+  function setSignaturePreviewMode(active){
+    if (!sigState.loaded) return;
+    els.signatureOverlay.classList.toggle("is-previewing", active);
+    els.sigPreviewBtn.classList.toggle("is-active", active);
+    els.sigPreviewBtn.textContent = active ? "✏️ Bấm để chỉnh tiếp" : "👁 Bấm để xem trước";
+  }
+  els.sigPreviewBtn.addEventListener("click", function(){
+    setSignaturePreviewMode(!els.sigPreviewBtn.classList.contains("is-active"));
+  });
+  // Nếu người dùng bắt đầu kéo/resize chữ ký trong lúc đang ở chế độ xem
+  // trước, tự động tắt chế độ này để hiện lại khung/nút chỉnh.
+  els.signatureOverlay.addEventListener("mousedown", function(){ setSignaturePreviewMode(false); });
+  els.signatureOverlay.addEventListener("touchstart", function(){ setSignaturePreviewMode(false); }, { passive: true });
+
+
+  /* ---- Kéo/thả (di chuyển) + kéo điểm neo (phóng to/thu nhỏ) ----
+     Dùng chung cho cả chuột (mousedown/mousemove/mouseup) và cảm ứng
+     (touchstart/touchmove/touchend) — không dùng Pointer Events để tương
+     thích tốt hơn với các WebView Android cũ. */
+  let dragCtx = null; // { mode: "move"|"resize", ... } hoặc null khi không kéo
+
+  function getEventPoint(e){
+    if (e.touches && e.touches.length) return { x: e.touches[0].clientX, y: e.touches[0].clientY };
+    if (e.changedTouches && e.changedTouches.length) return { x: e.changedTouches[0].clientX, y: e.changedTouches[0].clientY };
+    return { x: e.clientX, y: e.clientY };
+  }
+
+  function clamp(value, min, max){
+    return Math.min(Math.max(value, min), max);
+  }
+
+  /* Bán kính (px) vùng được coi là "đang nhắm vào 1 góc để đổi kích thước".
+     Giới hạn trong [8, 22] và không bao giờ vượt quá nửa cạnh ngắn hơn của
+     overlay — nhờ vậy 4 vùng góc KHÔNG BAO GIỜ chồng lấn lên nhau hay lên
+     vùng giữa, kể cả khi chữ ký được kéo rất nhỏ. Đây chính là lỗi trước
+     đây: vùng chạm ẩn 44px cố định của 4 góc chồng hết lên nhau khi chữ ký
+     nhỏ, khiến mọi thao tác chạm/click đều bị hiểu nhầm thành "đổi kích
+     thước" và không thể di chuyển được nữa. */
+  function getHandleRadius(width, height){
+    const MAX_RADIUS = 22, MIN_RADIUS = 8;
+    const halfShortSide = Math.min(width, height) / 2;
+    let r = halfShortSide - 2;
+    r = Math.max(MIN_RADIUS, Math.min(MAX_RADIUS, r));
+    // Sàn MIN_RADIUS ở trên có thể đẩy r vượt quá nửa cạnh ngắn hơn khi
+    // overlay rất nhỏ (ví dụ kéo thanh trượt kích thước xuống mức tối thiểu
+    // trên khung hẹp) — chặn thêm 1 lần nữa ở đây để giữ đúng bất biến đã
+    // nêu ở đầu hàm trong MỌI trường hợp, tránh tái diễn lỗi 4 vùng góc
+    // chồng lấn lên nhau (không thể kéo di chuyển) mà đoạn trên đã nhắc tới.
+    return Math.min(r, halfShortSide);
+  }
+
+  /* Trả về tên góc ("nw"/"ne"/"sw"/"se") nếu điểm chạm/click nằm đủ gần 1
+     trong 4 góc của overlay chữ ký, hoặc null nếu nằm ở vùng giữa (nghĩa là
+     người dùng muốn DI CHUYỂN chứ không phải đổi kích thước). rect ở đây
+     LUÔN LÀ hình chữ nhật thật của chính overlay tại thời điểm bắt đầu kéo. */
+  function pickHandleAtPoint(rect, pt){
+    const localX = pt.x - rect.left;
+    const localY = pt.y - rect.top;
+    const dist = {
+      nw: Math.hypot(localX, localY),
+      ne: Math.hypot(localX - rect.width, localY),
+      sw: Math.hypot(localX, localY - rect.height),
+      se: Math.hypot(localX - rect.width, localY - rect.height)
+    };
+    let nearest = null, nearestDist = Infinity;
+    Object.keys(dist).forEach(function(k){
+      if (dist[k] < nearestDist){ nearestDist = dist[k]; nearest = k; }
+    });
+    const radius = getHandleRadius(rect.width, rect.height);
+    return (nearestDist <= radius) ? nearest : null;
+  }
+
+  /* Điểm bắt đầu kéo DUY NHẤT trên overlay: tự quyết định là "di chuyển"
+     hay "đổi kích thước" dựa trên khoảng cách tới góc, thay vì dựa vào việc
+     sự kiện rơi trúng phần tử <div class="sig-handle"> nào (phần tử đó giờ
+     chỉ để hiển thị, đã tắt pointer-events trong CSS). Nhờ vậy hành vi luôn
+     nhất quán và lặp lại được nhiều lần, trên cả máy tính lẫn điện thoại. */
+  function onOverlayPointerDown(e){
+    if (!sigState.loaded) return;
+    const pt = getEventPoint(e);
+    const rect = els.signatureOverlay.getBoundingClientRect();
+    const handle = pickHandleAtPoint(rect, pt);
+    if (handle){
+      beginResizeSignature(handle, e);
+    } else {
+      beginMoveSignature(e);
+    }
+  }
+
+  /* Cập nhật con trỏ chuột khi rê qua gần góc (chỉ mang tính gợi ý trực
+     quan trên máy tính, không ảnh hưởng tới cảm ứng) — giúp người dùng biết
+     trước khi bấm xuống là sẽ "di chuyển" hay "đổi kích thước". */
+  function updateOverlayHoverCursor(e){
+    if (dragCtx || !sigState.loaded) return;
+    const rect = els.signatureOverlay.getBoundingClientRect();
+    const pt = getEventPoint(e);
+    const handle = pickHandleAtPoint(rect, pt);
+    const cursorByHandle = { nw: "nwse-resize", se: "nwse-resize", ne: "nesw-resize", sw: "nesw-resize" };
+    els.signatureOverlay.style.cursor = handle ? cursorByHandle[handle] : "move";
+  }
+
+  function beginMoveSignature(e){
+    if (!sigState.loaded) return;
+    e.preventDefault();
+    const pt = getEventPoint(e);
+    const rect = els.previewFrame.getBoundingClientRect();
+    dragCtx = {
+      mode: "move",
+      rect: rect,
+      startX: pt.x,
+      startY: pt.y,
+      startLeftPx: (sigState.xPct / 100) * rect.width,
+      startTopPx: (sigState.yPct / 100) * rect.height
+    };
+  }
+
+  function beginResizeSignature(handle, e){
+    if (!sigState.loaded) return;
+    e.preventDefault();
+    e.stopPropagation(); // không để sự kiện nổi lên tới overlay (tránh vừa move vừa resize)
+    const pt = getEventPoint(e);
+    const rect = els.previewFrame.getBoundingClientRect();
+    const leftPx = (sigState.xPct / 100) * rect.width;
+    const topPx = (sigState.yPct / 100) * rect.height;
+    const widthPx = (sigState.wPct / 100) * rect.width;
+    const heightPx = widthPx / sigState.aspect;
+
+    // "anchor" là góc ĐỐI DIỆN với điểm neo đang kéo — góc này luôn đứng yên
+    // trong lúc phóng to/thu nhỏ.
+    let anchor;
+    switch (handle){
+      case "nw": anchor = { x: leftPx + widthPx, y: topPx + heightPx }; break;
+      case "ne": anchor = { x: leftPx,            y: topPx + heightPx }; break;
+      case "sw": anchor = { x: leftPx + widthPx, y: topPx };            break;
+      case "se": anchor = { x: leftPx,            y: topPx };            break;
+    }
+
+    dragCtx = {
+      mode: "resize",
+      handle: handle,
+      rect: rect,
+      anchor: anchor
+    };
+  }
+
+  function onDragMove(e){
+    if (!dragCtx) return;
+    e.preventDefault();
+    const pt = getEventPoint(e);
+    const rect = dragCtx.rect;
+
+    if (dragCtx.mode === "move"){
+      const widthPx = (sigState.wPct / 100) * rect.width;
+      const heightPx = widthPx / sigState.aspect;
+      let newLeft = dragCtx.startLeftPx + (pt.x - dragCtx.startX);
+      let newTop = dragCtx.startTopPx + (pt.y - dragCtx.startY);
+      newLeft = clamp(newLeft, 0, Math.max(0, rect.width - widthPx));
+      newTop = clamp(newTop, 0, Math.max(0, rect.height - heightPx));
+      sigState.xPct = (newLeft / rect.width) * 100;
+      sigState.yPct = (newTop / rect.height) * 100;
+
+    } else if (dragCtx.mode === "resize"){
+      const MIN_WIDTH_PX = 28;
+      const curXInFrame = pt.x - rect.left; // toạ độ con trỏ, quy về hệ trục của khung preview
+
+      let newWidthPx;
+      switch (dragCtx.handle){
+        case "nw": newWidthPx = dragCtx.anchor.x - curXInFrame; break;
+        case "ne": newWidthPx = curXInFrame - dragCtx.anchor.x; break;
+        case "sw": newWidthPx = dragCtx.anchor.x - curXInFrame; break;
+        case "se": newWidthPx = curXInFrame - dragCtx.anchor.x; break;
+      }
+      newWidthPx = clamp(newWidthPx, MIN_WIDTH_PX, rect.width);
+      const newHeightPx = newWidthPx / sigState.aspect; // luôn suy từ chiều rộng -> giữ nguyên tỷ lệ khung hình
+
+      let newLeft, newTop;
+      switch (dragCtx.handle){
+        case "nw": newLeft = dragCtx.anchor.x - newWidthPx; newTop = dragCtx.anchor.y - newHeightPx; break;
+        case "ne": newLeft = dragCtx.anchor.x;              newTop = dragCtx.anchor.y - newHeightPx; break;
+        case "sw": newLeft = dragCtx.anchor.x - newWidthPx; newTop = dragCtx.anchor.y;               break;
+        case "se": newLeft = dragCtx.anchor.x;              newTop = dragCtx.anchor.y;               break;
+      }
+      newLeft = clamp(newLeft, 0, Math.max(0, rect.width - newWidthPx));
+      newTop = clamp(newTop, 0, Math.max(0, rect.height - newHeightPx));
+
+      sigState.wPct = (newWidthPx / rect.width) * 100;
+      sigState.xPct = (newLeft / rect.width) * 100;
+      sigState.yPct = (newTop / rect.height) * 100;
+    }
+
+    renderSignatureOverlay();
+  }
+
+  function onDragEnd(){
+    dragCtx = null;
+  }
+
+  els.signatureOverlay.addEventListener("mousedown", onOverlayPointerDown);
+  els.signatureOverlay.addEventListener("touchstart", onOverlayPointerDown, { passive: false });
+  els.signatureOverlay.addEventListener("mousemove", updateOverlayHoverCursor);
+
+  document.addEventListener("mousemove", onDragMove);
+  document.addEventListener("touchmove", onDragMove, { passive: false });
+  document.addEventListener("mouseup", onDragEnd);
+  document.addEventListener("touchend", onDragEnd);
+  document.addEventListener("touchcancel", onDragEnd);
+
+  // Khung preview có thể đổi kích thước (xoay máy, đổi cỡ cửa sổ) — vẽ lại
+  // lớp phủ theo % đã lưu để luôn khớp đúng vị trí/tỷ lệ.
+  window.addEventListener("resize", renderSignatureOverlay);
+  window.addEventListener("resize", renderEraseOverlay);
+
+  /* =========================================================
+     3d. PHÓNG TO ĐỂ CHỈNH TINH — kích đúp (máy tính) hoặc 2 ngón tay kéo
+     giãn/chụm (điện thoại) trên khung Xem trước để phóng to 150%–200%, giúp
+     kéo/đặt chữ ký chính xác hơn. Cách làm: chỉ đổi WIDTH THẬT của
+     previewFrame theo % (không dùng CSS transform), nên canvas trang PDF và
+     lớp phủ chữ ký — vốn đã được vẽ theo % của previewFrame — tự phóng to
+     theo đúng tỷ lệ mà không cần sửa gì thêm. Toạ độ chữ ký (xPct/yPct/wPct)
+     luôn được tính từ rect THỰC TẾ tại thời điểm thao tác, nên phóng to hay
+     không cũng không ảnh hưởng gì tới vị trí/kích thước đã đặt hay tới lúc
+     xuất file PDF (composeFinalCanvas không phụ thuộc mức phóng to này).
+     ========================================================= */
+  const ZOOM_SCALE_MIN = 1;      // 100% — kích thước gốc
+  const ZOOM_SCALE_MAX = 2;      // 200%
+  const ZOOM_SCALE_DBLCLICK = 1.75; // mức phóng khi bấm đúp (trong khoảng 150–200% yêu cầu)
+
+  const zoomState = { scale: ZOOM_SCALE_MIN };
+
+  /* Đổi mức phóng to, cố gắng giữ nguyên đúng điểm đang bấm/chụm (dưới con
+     trỏ hoặc giữa 2 ngón tay) tại chỗ cũ trên màn hình bằng cách canh lại
+     thanh cuộn của previewViewport sau khi đổi kích thước. focusClientX/Y là
+     toạ độ màn hình (clientX/clientY) của điểm cần giữ cố định; bỏ qua (căn
+     giữa) nếu không truyền vào. */
+  function setZoomScale(scale, focusClientX, focusClientY){
+    const viewport = els.previewViewport;
+    const frame = els.previewFrame;
+    const prevScale = zoomState.scale;
+    const newScale = clamp(scale, ZOOM_SCALE_MIN, ZOOM_SCALE_MAX);
+    if (Math.abs(newScale - prevScale) < 0.001) return;
+
+    const viewportRect = viewport.getBoundingClientRect();
+    const hasFocus = typeof focusClientX === "number" && typeof focusClientY === "number";
+    let ratioX = 0.5, ratioY = 0.5;
+    if (hasFocus && frame.offsetWidth && frame.offsetHeight){
+      ratioX = (viewport.scrollLeft + (focusClientX - viewportRect.left)) / frame.offsetWidth;
+      ratioY = (viewport.scrollTop + (focusClientY - viewportRect.top)) / frame.offsetHeight;
+    }
+
+    zoomState.scale = newScale;
+    frame.style.width = (newScale * 100) + "%";
+    viewport.classList.toggle("is-zoomed", newScale > ZOOM_SCALE_MIN);
+
+    // Đợi trình duyệt áp dụng width mới rồi mới canh lại thanh cuộn + vẽ lại
+    // lớp phủ chữ ký (renderSignatureOverlay cần kích thước khung mới nhất
+    // để tính đúng chiều cao theo px).
+    requestAnimationFrame(function(){
+      if (hasFocus){
+        viewport.scrollLeft = Math.max(0, ratioX * frame.offsetWidth - (focusClientX - viewportRect.left));
+        viewport.scrollTop = Math.max(0, ratioY * frame.offsetHeight - (focusClientY - viewportRect.top));
+      }
+      renderSignatureOverlay();
+      renderEraseOverlay();
+    });
+
+    if (newScale > ZOOM_SCALE_MIN){
+      setStatus("Đã phóng to " + Math.round(newScale * 100) + "% để chỉnh tinh — bấm đúp lần nữa (hoặc chụm 2 ngón tay) để thu nhỏ lại.");
+    } else {
+      setStatus("Đã thu nhỏ khung xem trước về 100%.");
+    }
+  }
+
+  // Bấm đúp: đang ở 100% thì phóng lên 175%, đang phóng to thì thu về 100%.
+  els.previewFrame.addEventListener("dblclick", function(e){
+    e.preventDefault();
+    const nextScale = (zoomState.scale > ZOOM_SCALE_MIN) ? ZOOM_SCALE_MIN : ZOOM_SCALE_DBLCLICK;
+    setZoomScale(nextScale, e.clientX, e.clientY);
+  });
+
+  // ---- 2 ngón tay kéo giãn/chụm (pinch) trên điện thoại ----
+  let pinchCtx = null; // { startDist, startScale } hoặc null khi không chụm
+
+  function getTouchDistance(touches){
+    const dx = touches[0].clientX - touches[1].clientX;
+    const dy = touches[0].clientY - touches[1].clientY;
+    return Math.hypot(dx, dy);
+  }
+
+  els.previewViewport.addEventListener("touchstart", function(e){
+    if (e.touches && e.touches.length === 2){
+      e.preventDefault();
+      pinchCtx = { startDist: getTouchDistance(e.touches), startScale: zoomState.scale };
+    }
+  }, { passive: false });
+
+  els.previewViewport.addEventListener("touchmove", function(e){
+    if (pinchCtx && e.touches && e.touches.length === 2 && pinchCtx.startDist > 0){
+      e.preventDefault();
+      const ratio = getTouchDistance(e.touches) / pinchCtx.startDist;
+      const midX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+      const midY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+      setZoomScale(pinchCtx.startScale * ratio, midX, midY);
+    }
+  }, { passive: false });
+
+  function endPinch(e){
+    if (pinchCtx && (!e.touches || e.touches.length < 2)) pinchCtx = null;
+  }
+  els.previewViewport.addEventListener("touchend", endPinch);
+  els.previewViewport.addEventListener("touchcancel", endPinch);
+
+  /* =========================================================
+     3e. CỤC TẨY (BÚT TẨY TỰ DO) — vẽ đè màu trắng lên bất kỳ vùng nào của
+     trang xem trước để che chữ/chi tiết không muốn giữ lại (số cũ, dấu mộc
+     cũ, ghi chú thừa...) trước khi lưu file. Toạ độ từng điểm của mỗi nét
+     vẽ được lưu theo % so với khung Xem trước (previewFrame) — CÙNG hệ toạ
+     độ với chữ ký (xPct/yPct) — nên vẽ lại đúng vị trí ở bất kỳ độ phân
+     giải nào: trên màn hình (theo kích thước khung hiện tại, kể cả khi đã
+     phóng to) lẫn khi gộp vào canvas xuất file (composeFinalCanvas). Nhờ
+     lưu dạng "vector" (danh sách điểm theo %) thay vì vẽ thẳng lên 1 canvas
+     ảnh cố định, nét tẩy luôn sắc nét dù xuất ở chất lượng nào.
+     ========================================================= */
+  const eraseState = {
+    active: false,       // đang bật bút tẩy (đang bắt sự kiện vẽ) hay không
+    widthPct: 3,          // độ dày nét, % theo chiều rộng khung Xem trước
+    strokes: [],          // các nét đã vẽ xong: mỗi nét {points:[{xPct,yPct},...], widthPct}
+    currentStroke: null   // nét đang vẽ dở (trong lúc kéo chuột/ngón tay)
+  };
+  let isDrawingErase = false;
+
+  /* Đặt lại đúng kích thước PIXEL THẬT (tính cả devicePixelRatio để nét vẽ
+     không bị mờ trên màn hình nét cao) cho canvas cục tẩy theo kích thước
+     hiển thị hiện tại của khung Xem trước — gọi lại mỗi khi khung đổi cỡ
+     (resize cửa sổ, xoay máy, phóng to để chỉnh tinh). */
+  function resizeEraseCanvasIfNeeded(){
+    const rect = els.previewFrame.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    const w = Math.max(1, Math.round(rect.width * dpr));
+    const h = Math.max(1, Math.round(rect.height * dpr));
+    if (els.eraseOverlayCanvas.width !== w || els.eraseOverlayCanvas.height !== h){
+      els.eraseOverlayCanvas.width = w;
+      els.eraseOverlayCanvas.height = h;
+    }
+  }
+
+  /* Vẽ 1 nét (đã xong hoặc đang vẽ dở) lên 1 ngữ cảnh canvas bất kỳ — dùng
+     chung cho cả canvas hiển thị trên màn hình lẫn canvas xuất file, chỉ
+     khác kích thước pixel truyền vào (canvasWidth/canvasHeight). */
+  function drawEraseStrokeOnContext(ctx, canvasWidth, canvasHeight, stroke){
+    if (!stroke || !stroke.points || stroke.points.length === 0) return;
+    const lineWidthPx = Math.max(1, (stroke.widthPct / 100) * canvasWidth);
+    ctx.save();
+    ctx.fillStyle = "#ffffff";
+    ctx.strokeStyle = "#ffffff";
+    ctx.lineJoin = "round";
+    ctx.lineCap = "round";
+    ctx.lineWidth = lineWidthPx;
+    if (stroke.points.length === 1){
+      // Bấm 1 điểm mà không kéo — vẽ 1 chấm tròn thay vì 1 đường kẻ.
+      const p = stroke.points[0];
+      ctx.beginPath();
+      ctx.arc((p.xPct / 100) * canvasWidth, (p.yPct / 100) * canvasHeight, lineWidthPx / 2, 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+      ctx.beginPath();
+      stroke.points.forEach(function(p, idx){
+        const x = (p.xPct / 100) * canvasWidth;
+        const y = (p.yPct / 100) * canvasHeight;
+        if (idx === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      });
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  /* Vẽ lại TOÀN BỘ các nét tẩy đã lưu (+ nét đang vẽ dở nếu có) lên canvas
+     hiển thị trên khung Xem trước. */
+  function renderEraseOverlay(){
+    resizeEraseCanvasIfNeeded();
+    const canvas = els.eraseOverlayCanvas;
+    const ctx = canvas.getContext("2d");
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    eraseState.strokes.forEach(function(stroke){
+      drawEraseStrokeOnContext(ctx, canvas.width, canvas.height, stroke);
+    });
+    if (eraseState.currentStroke){
+      drawEraseStrokeOnContext(ctx, canvas.width, canvas.height, eraseState.currentStroke);
+    }
+  }
+
+  /* Bật/tắt trạng thái "có thể bấm" của 2 nút Hoàn tác / Xóa hết tùy theo
+     có đang lưu nét tẩy nào hay không. */
+  function updateEraseActionButtonsState(){
+    const hasStrokes = eraseState.strokes.length > 0;
+    els.eraseUndoBtn.disabled = !hasStrokes;
+    els.eraseClearBtn.disabled = !hasStrokes;
+  }
+
+  /* Quy đổi toạ độ màn hình (clientX/clientY) của 1 sự kiện chuột/chạm sang
+     % theo khung Xem trước (previewFrame) — CÙNG cách previewFrame được
+     dùng để quy đổi vị trí chữ ký, đảm bảo mọi điểm vẽ luôn đúng chỗ dù
+     đang phóng to hay không. */
+  function getErasePointPct(e){
+    const rect = els.previewFrame.getBoundingClientRect();
+    const pt = getEventPoint(e);
+    return {
+      xPct: clamp(((pt.x - rect.left) / rect.width) * 100, 0, 100),
+      yPct: clamp(((pt.y - rect.top) / rect.height) * 100, 0, 100)
+    };
+  }
+
+  function onErasePointerDown(e){
+    if (!eraseState.active) return;
+    // Chạm bằng 2 ngón trở lên là đang chụm/giãn để phóng to — nhường lại
+    // cho phần xử lý pinch-zoom, không bắt đầu vẽ nét tẩy. Nếu ngón tay thứ 2
+    // chạm xuống ngay TRONG LÚC đang vẽ dở 1 nét (isDrawingErase), chốt lại
+    // nét đó luôn thay vì bỏ lửng, để không bị vừa tẩy vừa phóng to cùng lúc.
+    if (e.touches && e.touches.length > 1){
+      if (isDrawingErase) onEraseUp();
+      return;
+    }
+    e.preventDefault();
+    isDrawingErase = true;
+    eraseState.currentStroke = { points: [getErasePointPct(e)], widthPct: eraseState.widthPct };
+    renderEraseOverlay();
+  }
+
+  function onEraseMove(e){
+    if (!isDrawingErase || !eraseState.currentStroke) return;
+    // Có thêm ngón tay thứ 2 giữa chừng (chuyển sang chụm để phóng to): chốt
+    // nét tẩy đang vẽ dở lại ngay, không vẽ tiếp theo chuyển động 2 ngón.
+    if (e.touches && e.touches.length > 1){ onEraseUp(); return; }
+    e.preventDefault();
+    eraseState.currentStroke.points.push(getErasePointPct(e));
+    renderEraseOverlay();
+  }
+
+  function onEraseUp(){
+    if (!isDrawingErase) return;
+    isDrawingErase = false;
+    if (eraseState.currentStroke && eraseState.currentStroke.points.length > 0){
+      eraseState.strokes.push(eraseState.currentStroke);
+    }
+    eraseState.currentStroke = null;
+    updateEraseActionButtonsState();
+    renderEraseOverlay();
+  }
+
+  els.eraseOverlayCanvas.addEventListener("mousedown", onErasePointerDown);
+  els.eraseOverlayCanvas.addEventListener("touchstart", onErasePointerDown, { passive: false });
+  document.addEventListener("mousemove", onEraseMove);
+  document.addEventListener("touchmove", onEraseMove, { passive: false });
+  document.addEventListener("mouseup", onEraseUp);
+  document.addEventListener("touchend", onEraseUp);
+  document.addEventListener("touchcancel", onEraseUp);
+  // Tránh việc bấm/tô nhanh 2 lần liên tiếp trong lúc đang tẩy bị hiểu nhầm
+  // thành thao tác "bấm đúp để phóng to".
+  els.eraseOverlayCanvas.addEventListener("dblclick", function(e){
+    if (eraseState.active) e.stopPropagation();
+  });
+
+  /* Bật/tắt chế độ tẩy: thêm/bớt class "is-erase-mode" trên previewFrame —
+     CSS lo phần chuyển pointer-events giữa lớp phủ chữ ký và canvas tẩy. */
+  function setEraseModeActive(active){
+    eraseState.active = active;
+    els.previewFrame.classList.toggle("is-erase-mode", active);
+    els.eraseToggleBtn.classList.toggle("is-active", active);
+    els.eraseToggleBtn.textContent = active ? "🧽 Đang bật — bấm để tắt bút tẩy" : "🧽 Bật bút tẩy";
+    if (active){
+      setStatus("Đã bật bút tẩy — tô/vẽ trực tiếp lên vùng cần xóa trên trang xem trước.");
+    }
+  }
+
+  els.eraseToggleBtn.addEventListener("click", function(){
+    if (els.eraseToggleBtn.disabled) return;
+    setEraseModeActive(!eraseState.active);
+  });
+
+  function setEraseWidthPct(newWidthPct){
+    eraseState.widthPct = clamp(newWidthPct, 1, 10);
+    els.eraseSizeRange.value = eraseState.widthPct;
+    els.eraseSizeValue.textContent = eraseState.widthPct + "%";
+  }
+
+  els.eraseSizeRange.addEventListener("input", function(){
+    setEraseWidthPct(parseFloat(els.eraseSizeRange.value));
+  });
+  els.eraseSizeMinus.addEventListener("click", function(){
+    setEraseWidthPct(eraseState.widthPct - 0.5);
+  });
+  els.eraseSizePlus.addEventListener("click", function(){
+    setEraseWidthPct(eraseState.widthPct + 0.5);
+  });
+
+  els.eraseUndoBtn.addEventListener("click", function(){
+    if (eraseState.strokes.length === 0) return;
+    eraseState.strokes.pop();
+    updateEraseActionButtonsState();
+    renderEraseOverlay();
+    setStatus("Đã hoàn tác nét tẩy vừa vẽ.");
+  });
+
+  els.eraseClearBtn.addEventListener("click", function(){
+    if (eraseState.strokes.length === 0) return;
+    eraseState.strokes = [];
+    updateEraseActionButtonsState();
+    renderEraseOverlay();
+    setStatus("Đã xóa hết các nét tẩy trên trang.");
+  });
+
+  /* Đưa tính năng tẩy về trạng thái ban đầu — dùng khi chọn PDF mới hoặc
+     bấm "Xóa hết, làm văn bản mới", vì nét tẩy cũ gắn với trang PDF cũ. */
+  function resetEraseFeature(){
+    eraseState.strokes = [];
+    eraseState.currentStroke = null;
+    isDrawingErase = false;
+    setEraseWidthPct(3);
+    setEraseModeActive(false);
+    updateEraseActionButtonsState();
+    renderEraseOverlay();
+  }
+
+  /* =========================================================
+     4a. GỘP CANVAS CUỐI CÙNG — khổ A4, kích thước pixel + chất lượng nén
+     JPEG tùy theo mức người dùng chọn ở khối "Chất lượng file xuất".
+     Mức mặc định "cao" giữ NGUYÊN kích thước/chất lượng như trước khi có
+     tùy chọn này (2480×3508px @300 DPI, JPEG 0.92) — hành vi cũ không đổi
+     nếu người dùng không đụng vào tùy chọn mới.
+     ========================================================= */
+  const EXPORT_QUALITY_PRESETS = {
+    cao: { widthPx: 2480, heightPx: 3508, jpegQuality: 0.92 }, // mặc định, giữ nguyên như trước
+    vua: { widthPx: 1654, heightPx: 2339, jpegQuality: 0.85 }, // ~200 DPI, nhẹ hơn đáng kể
+    nhe: { widthPx: 1240, heightPx: 1754, jpegQuality: 0.72 }  // ~150 DPI, ưu tiên dung lượng nhỏ nhất để gửi email
+  };
+  let exportQualityKey = "cao";
+
+  /* Vẽ nội dung trang PDF (đã hiển thị trên #pdfPreviewCanvas) lên khổ A4
+     xuất ra, GIỮ NGUYÊN tỷ lệ gốc của trang và căn giữa trên nền trắng
+     (không kéo giãn phủ kín, tránh làm méo nội dung khi trang gốc không
+     đúng tỷ lệ A4, ví dụ khổ Letter). Sau đó vẽ ảnh chữ ký (nếu có) lên
+     ĐÚNG vị trí/kích thước tương đối mà người dùng đã kéo/thả trên khung
+     Xem trước — vì cả khung Xem trước (previewFrame, luôn giữ tỷ lệ A4)
+     lẫn canvas xuất này đều dùng chung hệ toạ độ theo % (xPct/yPct/wPct)
+     tính trên khung A4, việc quy đổi chỉ đơn giản là nhân với kích thước
+     khổ A4 đang chọn — không phụ thuộc vào việc nội dung trang có bị
+     letterbox hay không, vì cả hai nơi đều letterbox giống hệt nhau. */
+  function composeFinalCanvas(){
+    const preset = EXPORT_QUALITY_PRESETS[exportQualityKey] || EXPORT_QUALITY_PRESETS.cao;
+    const exportCanvas = document.createElement("canvas");
+    exportCanvas.width = preset.widthPx;
+    exportCanvas.height = preset.heightPx;
+    const ctx = exportCanvas.getContext("2d");
+
+    // Nền trắng trước, phòng trường hợp nội dung PDF không phủ kín 100%
+    // (ví dụ trang PDF có tỉ lệ khác A4 một chút).
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, exportCanvas.width, exportCanvas.height);
+
+    // Vẽ trang PDF theo đúng tỷ lệ gốc, căn giữa trên nền trắng khổ A4 —
+    // giống hệt cách #pdfPreviewCanvas tự co vừa (max-width/max-height
+    // 100%, width/height auto) và được previewFrame canh giữa bằng flex.
+    // Nếu trang gốc không đúng tỷ lệ A4 (ví dụ khổ Letter), sẽ có viền
+    // trắng ở 2 bên hoặc trên/dưới thay vì bị méo như trước.
+    const srcCanvas = els.pdfPreviewCanvas;
+    const fitScale = Math.min(
+      exportCanvas.width / srcCanvas.width,
+      exportCanvas.height / srcCanvas.height
+    );
+    const drawWidth = srcCanvas.width * fitScale;
+    const drawHeight = srcCanvas.height * fitScale;
+    const drawLeft = (exportCanvas.width - drawWidth) / 2;
+    const drawTop = (exportCanvas.height - drawHeight) / 2;
+    ctx.drawImage(srcCanvas, drawLeft, drawTop, drawWidth, drawHeight);
+
+    // Vẽ các nét "cục tẩy" (nếu có) — phủ trắng lên đúng vùng người dùng đã
+    // tô trên khung Xem trước để che chữ/chi tiết không muốn giữ lại. Vẽ
+    // TRƯỚC chữ ký để nếu chữ ký đặt đè lên vùng vừa tẩy thì vẫn hiển thị
+    // đúng phía trên, giống thứ tự trên khung Xem trước.
+    eraseState.strokes.forEach(function(stroke){
+      drawEraseStrokeOnContext(ctx, exportCanvas.width, exportCanvas.height, stroke);
+    });
+
+    // Vẽ chữ ký (nếu người dùng đã chọn) theo đúng vị trí/kích thước tương
+    // đối đã thiết lập trên Preview. Dùng globalCompositeOperation =
+    // "multiply" để nền trắng/xám của ảnh chữ ký hòa vào nội dung trang PDF
+    // bên dưới (giống hiệu ứng mix-blend-mode: multiply ở khung xem trước),
+    // rồi trả lại "source-over" ngay sau đó để không ảnh hưởng các lệnh vẽ
+    // tiếp theo.
+    if (sigState.loaded){
+      const sigWidthPx = (sigState.wPct / 100) * exportCanvas.width;
+      const sigHeightPx = sigWidthPx / sigState.aspect;
+      const sigLeftPx = (sigState.xPct / 100) * exportCanvas.width;
+      const sigTopPx = (sigState.yPct / 100) * exportCanvas.height;
+      // Vẽ từ canvas đã tô màu (sigState.tintedCanvas) thay vì thẻ <img> khi
+      // có sẵn, để không phụ thuộc việc <img> đã giải mã xong data URL hay
+      // chưa (xem ghi chú tại renderSignatureColor); vẫn giữ <img> làm
+      // phương án dự phòng nếu vì lý do nào đó chưa có canvas này.
+      const sigDrawSource = sigState.tintedCanvas || els.signatureOverlayImg;
+      ctx.globalCompositeOperation = "multiply";
+      ctx.drawImage(sigDrawSource, sigLeftPx, sigTopPx, sigWidthPx, sigHeightPx);
+      ctx.globalCompositeOperation = "source-over";
+    }
+
+    return exportCanvas;
+  }
+
+  /* =========================================================
+     4b. XUẤT CANVAS THÀNH TỆP PDF THUẦN (không dùng thư viện ngoài)
+     (lấy lại nguyên vẹn từ mã nguồn gốc — ImageJoiner: canvasToPdfBlob,
+     buildPdfFromJpegBytes, concatByteArrays, canvasToBlobAsync, downloadBlob)
+     ========================================================= */
+
+  /* Ghép nhiều Uint8Array thành 1 mảng byte liền, dùng để dựng nội dung tệp
+     PDF (có xen dữ liệu nhị phân JPEG giữa các đoạn văn bản PDF). */
+  function concatByteArrays(list){
+    let total = 0;
+    list.forEach(function(part){ total += part.length; });
+    const out = new Uint8Array(total);
+    let pos = 0;
+    list.forEach(function(part){ out.set(part, pos); pos += part.length; });
+    return out;
+  }
+
+  /* Bọc canvas.toBlob bằng Promise để dùng được với async/await */
+  function canvasToBlobAsync(canvas, mimeType, quality){
+    return new Promise(function(resolve, reject){
+      canvas.toBlob(function(blob){
+        if (blob) resolve(blob); else reject(new Error("Không thể tạo dữ liệu ảnh để xuất."));
+      }, mimeType, quality);
+    });
+  }
+
+  /* Dựng toàn bộ byte của 1 tệp PDF 1 trang từ dữ liệu JPEG có sẵn.
+     pixelWidth/pixelHeight: kích thước ẢNH THẬT theo pixel (dùng cho khoá
+     /Width, /Height của ảnh nhúng — PHẢI khớp đúng dữ liệu JPEG, không phải
+     kích thước trang). Kích thước TRANG quy đổi từ pixel sang điểm PDF theo
+     chuẩn 96px = 1 inch (px CSS của trình duyệt) => 72pt = 1 inch, rồi giới
+     hạn không vượt quá 14400pt (200 inch) mỗi chiều — mức Adobe khuyến nghị
+     để tương thích rộng với các trình đọc PDF; ảnh vẫn được vẽ phủ kín đúng
+     trang đã giới hạn (không bị cắt/méo vì tỉ lệ 2 chiều giữ nguyên). */
+  function buildPdfFromJpegBytes(jpegBytes, pixelWidth, pixelHeight){
+    const PX_TO_PT = 72 / 96;
+    const MAX_PAGE_PT = 14400;
+
+    let pageWidth = pixelWidth * PX_TO_PT;
+    let pageHeight = pixelHeight * PX_TO_PT;
+    if (pageWidth > MAX_PAGE_PT || pageHeight > MAX_PAGE_PT){
+      const shrink = Math.min(MAX_PAGE_PT / pageWidth, MAX_PAGE_PT / pageHeight);
+      pageWidth *= shrink;
+      pageHeight *= shrink;
+    }
+    pageWidth = Math.max(1, +pageWidth.toFixed(2));
+    pageHeight = Math.max(1, +pageHeight.toFixed(2));
+
+    const enc = new TextEncoder();
+    const t = function(str){ return enc.encode(str); };
+
+    // Nội dung trang: vẽ ảnh Im0 phủ kín toàn bộ MediaBox (ma trận cm scale
+    // đúng bằng kích thước trang vì ảnh XObject luôn được định nghĩa trong
+    // "hình vuông đơn vị" 1x1 theo chuẩn PDF).
+    const contentBytes = t("q\n" + pageWidth + " 0 0 " + pageHeight + " 0 0 cm\n/Im0 Do\nQ");
+
+    const header = t("%PDF-1.4\n");
+    const obj1 = t("1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");
+    const obj2 = t("2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n");
+    const obj3 = t(
+      "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 " + pageWidth + " " + pageHeight +
+      "] /Resources << /XObject << /Im0 5 0 R >> >> /Contents 4 0 R >>\nendobj\n"
+    );
+    const obj4 = concatByteArrays([
+      t("4 0 obj\n<< /Length " + contentBytes.length + " >>\nstream\n"),
+      contentBytes,
+      t("\nendstream\nendobj\n")
+    ]);
+    const obj5 = concatByteArrays([
+      t(
+        "5 0 obj\n<< /Type /XObject /Subtype /Image /Width " + pixelWidth + " /Height " + pixelHeight +
+        " /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length " + jpegBytes.length + " >>\nstream\n"
+      ),
+      jpegBytes,
+      t("\nendstream\nendobj\n")
+    ]);
+
+    const bodyParts = [obj1, obj2, obj3, obj4, obj5];
+    const offsets = [];
+    let running = header.length;
+    bodyParts.forEach(function(part){
+      offsets.push(running);
+      running += part.length;
+    });
+
+    const xrefOffset = running;
+    let xrefStr = "xref\n0 6\n0000000000 65535 f \n";
+    offsets.forEach(function(off){
+      xrefStr += String(off).padStart(10, "0") + " 00000 n \n";
+    });
+    const xrefBytes = t(xrefStr);
+    const trailerBytes = t("trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n" + xrefOffset + "\n%%EOF");
+
+    return concatByteArrays([header].concat(bodyParts).concat([xrefBytes, trailerBytes]));
+  }
+
+  /* Nén canvas kết quả thành JPEG rồi đóng gói ngay dữ liệu JPEG đó vào 1
+     tệp PDF — trả về Blob PDF sẵn sàng để tải về. */
+  async function canvasToPdfBlob(canvas, quality){
+    const jpegBlob = await canvasToBlobAsync(canvas, "image/jpeg", quality);
+    const jpegBuffer = await readAsArrayBufferAsync(jpegBlob);
+    const jpegBytes = new Uint8Array(jpegBuffer);
+    const pdfBytes = buildPdfFromJpegBytes(jpegBytes, canvas.width, canvas.height);
+    return new Blob([pdfBytes], { type: "application/pdf" });
+  }
+
+  /* Tải một Blob về máy dưới dạng tệp, sau đó giải phóng Object URL
+     và phần tử <a> tạm thời để không rò rỉ bộ nhớ. */
+  function downloadBlob(blob, filename){
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    setTimeout(function(){ URL.revokeObjectURL(url); }, 2000);
+  }
+
+  function formatBytes(bytes){
+    if (bytes < 1024) return bytes + " B";
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
+    return (bytes / (1024 * 1024)).toFixed(2) + " MB";
+  }
+
+  /* Dựng tên file xuất ra dựa theo tên file PDF gốc đã chọn (bỏ đuôi ".pdf"
+     rồi nối thêm "-da-ky." + đuôi tương ứng), để ký nhiều văn bản liên tiếp
+     không bị đè tên file lẫn nhau trong thư mục Tải xuống. Tham số
+     "extension" là "pdf" (mặc định) hoặc "jpg". Nếu vì lý do nào đó không
+     có tên file gốc, vẫn dùng lại tên mặc định như trước. */
+  function buildOutputFileName(extension){
+    const ext = extension || "pdf";
+    const originalName = pickedState.pdfFile && pickedState.pdfFile.name;
+    if (!originalName) return "Tai-lieu-da-ky." + ext;
+    const baseName = originalName.replace(/\.pdf$/i, "");
+    return baseName + "-da-ky." + ext;
+  }
+
+  /* =========================================================
+     4c. XỬ LÝ NÚT "LƯU THÀNH FILE PDF"
+     ========================================================= */
+  function handleSaveClick(){
+    if (!els.pdfPreviewCanvas.classList.contains("is-visible")){
+      setStatus("Chưa có tệp PDF để lưu. Vui lòng chọn tệp PDF ở bước 1.", true);
+      return;
+    }
+
+    els.btnSave.disabled = true;
+    els.btnSaveJpg.disabled = true;
+    setStatus("Đang tạo tệp PDF…");
+
+    // Trì hoãn 1 nhịp để trình duyệt kịp cập nhật trạng thái nút/thông báo
+    // trước khi xử lý canvas (có thể mất một chút thời gian ở khổ A4 lớn).
+    setTimeout(function(){
+      try{
+        const outputFileName = buildOutputFileName("pdf");
+        const exportCanvas = composeFinalCanvas();
+        const jpegQuality = (EXPORT_QUALITY_PRESETS[exportQualityKey] || EXPORT_QUALITY_PRESETS.cao).jpegQuality;
+        canvasToPdfBlob(exportCanvas, jpegQuality).then(function(blob){
+          downloadBlob(blob, outputFileName);
+          setStatus("Đã lưu file: " + outputFileName + " (" + formatBytes(blob.size) + ").");
+        }).catch(function(err){
+          setStatus(err && err.message ? err.message : "Không thể tạo tệp PDF.", true);
+        }).then(function(){
+          els.btnSave.disabled = false;
+          els.btnSaveJpg.disabled = false;
+        });
+      } catch (err){
+        setStatus(err && err.message ? err.message : "Không thể tạo tệp PDF.", true);
+        els.btnSave.disabled = false;
+        els.btnSaveJpg.disabled = false;
+      }
+    }, 30);
+  }
+
+  els.btnSave.addEventListener("click", handleSaveClick);
+
+  /* =========================================================
+     4d. XỬ LÝ NÚT "LƯU ẢNH JPG" — dùng lại NGUYÊN nội dung đã ghép sẵn
+     trên khung Xem trước (composeFinalCanvas: trang PDF + nét tẩy + chữ
+     ký), chỉ khác bước cuối là đóng gói thành ảnh JPEG thay vì bọc vào
+     PDF — tận dụng lại canvasToBlobAsync đã có sẵn từ trước. Độ nén JPEG
+     lấy theo đúng mức "Chất lượng file xuất" người dùng đang chọn, để 2
+     định dạng xuất ra nhất quán với nhau về chất lượng/dung lượng.
+     ========================================================= */
+  function handleSaveJpgClick(){
+    if (!els.pdfPreviewCanvas.classList.contains("is-visible")){
+      setStatus("Chưa có tệp PDF để lưu. Vui lòng chọn tệp PDF ở bước 1.", true);
+      return;
+    }
+
+    els.btnSave.disabled = true;
+    els.btnSaveJpg.disabled = true;
+    setStatus("Đang tạo ảnh JPG…");
+
+    setTimeout(function(){
+      try{
+        const outputFileName = buildOutputFileName("jpg");
+        const exportCanvas = composeFinalCanvas();
+        const jpegQuality = (EXPORT_QUALITY_PRESETS[exportQualityKey] || EXPORT_QUALITY_PRESETS.cao).jpegQuality;
+        canvasToBlobAsync(exportCanvas, "image/jpeg", jpegQuality).then(function(blob){
+          downloadBlob(blob, outputFileName);
+          setStatus("Đã lưu ảnh: " + outputFileName + " (" + formatBytes(blob.size) + ").");
+        }).catch(function(err){
+          setStatus(err && err.message ? err.message : "Không thể tạo ảnh JPG.", true);
+        }).then(function(){
+          els.btnSave.disabled = false;
+          els.btnSaveJpg.disabled = false;
+        });
+      } catch (err){
+        setStatus(err && err.message ? err.message : "Không thể tạo ảnh JPG.", true);
+        els.btnSave.disabled = false;
+        els.btnSaveJpg.disabled = false;
+      }
+    }, 30);
+  }
+
+  els.btnSaveJpg.addEventListener("click", handleSaveJpgClick);
+
+  /* =========================================================
+     4e. PHÍM TẮT Ctrl+S / Ctrl+Shift+S — CHẶN hành vi mặc định của trình
+     duyệt (Ctrl+S vốn mở hộp thoại "Save As" của Chrome để lưu NGUYÊN
+     trang web dạng file HTML — không phải điều người dùng muốn), thay vào
+     đó gọi đúng 2 nút lưu file đã có sẵn của phần mềm:
+       - Ctrl+S (hoặc ⌘S trên Mac)         → lưu file PDF (giống nút chính)
+       - Ctrl+Shift+S (hoặc ⌘⇧S trên Mac)  → lưu ảnh JPG (giống nút phụ)
+     Nếu chưa có trang PDF nào để lưu (nút đang khóa) thì chỉ hiện thông
+     báo nhắc chọn tệp PDF ở bước 1, không làm gì thêm. */
+  document.addEventListener("keydown", function(e){
+    const key = (e.key || "").toLowerCase();
+    if (!(e.ctrlKey || e.metaKey) || key !== "s") return;
+    e.preventDefault();
+    // Bỏ qua sự kiện lặp lại do giữ phím (auto-repeat của hệ điều hành) — nếu
+    // không, việc lỡ giữ Ctrl+S sẽ gọi lại nhiều lần trong lúc file trước đó
+    // còn đang xử lý (nút đang tạm khóa), khiến hiện nhầm thông báo "Chưa có
+    // tệp PDF để lưu" dù thực ra PDF vẫn còn đó, chỉ là đang lưu dở.
+    if (e.repeat) return;
+
+    if (e.shiftKey){
+      if (!els.btnSaveJpg.disabled) handleSaveJpgClick();
+      else setStatus("Chưa có tệp PDF để lưu. Vui lòng chọn tệp PDF ở bước 1.", true);
+    } else {
+      if (!els.btnSave.disabled) handleSaveClick();
+      else setStatus("Chưa có tệp PDF để lưu. Vui lòng chọn tệp PDF ở bước 1.", true);
+    }
+  });
+
+  /* =========================================================
+     4. NÚT 1 — CHỌN TỆP PDF
+     ========================================================= */
+  els.btnPickPdf.addEventListener("click", function(){
+    els.inputPdf.click();
+  });
+
+  els.inputPdf.addEventListener("change", function(){
+    const file = els.inputPdf.files && els.inputPdf.files[0];
+    if (!file) return;
+
+    if (!isPdfFile(file)){
+      setStatus("Tệp \"" + file.name + "\" không phải định dạng PDF hợp lệ — vui lòng chọn lại.", true);
+      els.inputPdf.value = "";
+      return;
+    }
+
+    pickedState.pdfFile = file;
+    els.pdfFileName.textContent = file.name;
+    els.btnPickPdf.classList.add("is-done");
+    updateResetAllButtonState();
+
+    setStatus("Đang đọc tệp PDF: " + file.name + "…");
+    resetPdfPreview("Đang tải trang xem trước…");
+    els.btnSave.disabled = true;
+    els.btnSaveJpg.disabled = true;
+
+    // Trang PDF mới thì các nét tẩy đã vẽ trên trang cũ (nếu có) không còn
+    // phù hợp nữa — reset lại cho sạch, đồng thời tạm khóa nút bút tẩy cho
+    // tới khi trang mới hiển thị xong.
+    resetEraseFeature();
+    els.eraseToggleBtn.disabled = true;
+
+    decodePdfFirstPage(file).then(function(pageResult){
+      renderPdfPageToPreview(pageResult);
+      els.btnSave.disabled = false;
+      els.btnSaveJpg.disabled = false;
+      els.eraseToggleBtn.disabled = false;
+      renderEraseOverlay();
+      setStatus("Đã hiển thị trang đầu của tệp PDF: " + file.name + ".");
+    }).catch(function(err){
+      resetPdfPreview("Không thể xem trước tệp PDF này.");
+      setStatus(err && err.message ? err.message : "Không thể đọc tệp PDF.", true);
+    });
+  });
+
+  /* =========================================================
+     5. NÚT 2 — CHỌN ẢNH CHỮ KÝ
+     ========================================================= */
+  els.btnPickSignature.addEventListener("click", function(){
+    els.inputSignature.click();
+  });
+
+  els.inputSignature.addEventListener("change", function(){
+    const file = els.inputSignature.files && els.inputSignature.files[0];
+    if (!file) return;
+
+    if (!isImageFile(file)){
+      setStatus("Tệp \"" + file.name + "\" không phải định dạng ảnh hợp lệ — vui lòng chọn lại.", true);
+      els.inputSignature.value = "";
+      return;
+    }
+
+    pickedState.signatureFile = file;
+    els.signatureFileName.textContent = file.name;
+    els.btnPickSignature.classList.add("is-done");
+
+    setStatus("Đang xử lý ảnh chữ ký: " + file.name + "…");
+
+    normalizeSignatureOrientation(file).then(function(result){
+      showSignatureOverlay(result.canvas, result.width, result.height);
+      setStatus("Đã thêm chữ ký: " + file.name + ". Kéo để di chuyển, kéo góc để đổi kích thước.");
+    }).catch(function(err){
+      setStatus(err && err.message ? err.message : "Không thể xử lý ảnh chữ ký.", true);
+    });
+  });
+
+  /* =========================================================
+     6a. NÚT "XÓA HẾT, LÀM VĂN BẢN MỚI" — đưa app về trạng thái ban đầu để
+     ký văn bản khác, không cần tải lại trang. Chỉ xóa PDF + chữ ký đang
+     làm việc hiện tại; 3 ô chữ ký đã lưu sẵn (sigSlots/localStorage) và vị
+     trí/kích thước chữ ký ghi nhớ lần gần nhất KHÔNG bị đụng tới, để lần
+     thêm chữ ký tiếp theo vẫn tự áp dụng lại như cũ.
+     ========================================================= */
+  function resetWholeApp(){
+    // Xóa chữ ký đang dùng (nếu có) — dùng lại đúng hàm đã có để đồng bộ
+    // toàn bộ trạng thái liên quan (overlay, nút, ô chọn tệp ảnh...).
+    if (sigState.loaded) removeSignatureOverlay();
+
+    // Xóa PDF đang xem/đã chọn.
+    pickedState.pdfFile = null;
+    els.inputPdf.value = "";
+    els.pdfFileName.textContent = "Chưa chọn tệp nào";
+    els.btnPickPdf.classList.remove("is-done");
+    resetPdfPreview("Chọn tệp PDF ở trên để xem trước tại đây");
+    els.btnSave.disabled = true;
+    els.btnSaveJpg.disabled = true;
+
+    // Xóa luôn các nét tẩy đang có và tắt/khóa bút tẩy vì chưa có trang PDF.
+    resetEraseFeature();
+    els.eraseToggleBtn.disabled = true;
+
+    updateResetAllButtonState();
+    setStatus("Đã xóa hết — sẵn sàng để ký văn bản mới.");
+  }
+
+  els.btnResetAll.addEventListener("click", resetWholeApp);
+
+  /* =========================================================
+     6b0. CHỌN MÀU MỰC CHỮ KÝ — đổi màu áp dụng ngay lập tức lên lớp phủ
+     (renderSignatureColor tô lại từ sigState.rawCanvas), file PDF xuất ra
+     tự động khớp theo vì composeFinalCanvas luôn vẽ đúng ảnh đang hiển thị
+     trên lớp phủ. Lựa chọn màu được giữ nguyên cho lần thêm chữ ký tiếp
+     theo (không reset về "Gốc" khi xóa/chọn ảnh khác).
+     ========================================================= */
+  els.sigColorOptions.addEventListener("click", function(e){
+    const btn = e.target.closest(".color-btn");
+    if (!btn || !els.sigColorOptions.contains(btn)) return;
+
+    sigState.colorKey = btn.getAttribute("data-color");
+
+    const buttons = els.sigColorOptions.querySelectorAll(".color-btn");
+    buttons.forEach(function(b){
+      const isActive = (b === btn);
+      b.classList.toggle("is-active", isActive);
+      b.setAttribute("aria-pressed", isActive ? "true" : "false");
+    });
+
+    renderSignatureColor();
+  });
+
+  /* =========================================================
+     6b. CHỌN CHẤT LƯỢNG/DUNG LƯỢNG FILE XUẤT — chỉ đổi state
+     exportQualityKey dùng khi bấm "Lưu thành file PDF"; không đụng gì tới
+     canvas xem trước hay vị trí chữ ký, nên chọn trước/sau khi chỉnh chữ
+     ký đều được.
+     ========================================================= */
+  els.exportQualityOptions.addEventListener("click", function(e){
+    const btn = e.target.closest(".quality-btn");
+    if (!btn || !els.exportQualityOptions.contains(btn)) return;
+
+    exportQualityKey = btn.getAttribute("data-quality");
+
+    const buttons = els.exportQualityOptions.querySelectorAll(".quality-btn");
+    buttons.forEach(function(b){
+      const isActive = (b === btn);
+      b.classList.toggle("is-active", isActive);
+      b.setAttribute("aria-pressed", isActive ? "true" : "false");
+    });
+
+    if (exportQualityKey === "vua"){
+      els.exportQualityHint.textContent = "Mức \"Vừa\": file nhỏ hơn đáng kể, vẫn đủ rõ để đọc và in thông thường.";
+    } else if (exportQualityKey === "nhe"){
+      els.exportQualityHint.textContent = "Mức \"Nhẹ\": dung lượng nhỏ nhất, phù hợp gửi qua email hoặc Zalo.";
+    } else {
+      els.exportQualityHint.textContent = "Mức \"Cao\" giữ nguyên chất lượng như trước. Chọn \"Vừa\" hoặc \"Nhẹ\" để file nhỏ hơn, dễ gửi qua email.";
+    }
+  });
+
+  /* =========================================================
+     6. KHỞI TẠO BAN ĐẦU — 2 nút Lưu chỉ bật khi đã có tệp PDF hiển thị
+     thành công trên khung Xem trước (xem els.btnSave.disabled/
+     els.btnSaveJpg.disabled trong handler của inputPdf ở mục 4).
+     ========================================================= */
+  els.btnSave.disabled = true;
+  els.btnSaveJpg.disabled = true;
+
+})();
+</script>
+</body>
+</html>
